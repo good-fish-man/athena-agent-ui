@@ -29,6 +29,8 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run build
+      - name: Include license notices
+        run: cp LICENSE NOTICE THIRD_PARTY_NOTICES.md dist/
       - name: Package static site
         run: |
           set -euo pipefail
