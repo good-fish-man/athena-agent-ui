@@ -146,4 +146,4 @@ docker run --rm -p 3000:3000 athena-agent-ui
 
 ## 许可证
 
-公开分发前请为仓库补充许可证。源码文件中的独立许可证声明仍按对应声明执行。
+Athena Agent UI 使用 [Apache License 2.0](LICENSE)。版权和依赖说明参见 [NOTICE](NOTICE) 与 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。带有独立声明的源码或依赖仍按其各自条款执行。

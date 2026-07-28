@@ -146,4 +146,4 @@ The image serves `dist/` with Nginx. Ensure the browser can reach the configured
 
 ## License
 
-Add a repository license before public redistribution. Source files that declare an individual license remain governed by that notice.
+Athena Agent UI is licensed under the [Apache License 2.0](LICENSE). See [NOTICE](NOTICE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Source files or dependencies carrying separate notices remain governed by those notices.
