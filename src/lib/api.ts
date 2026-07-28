@@ -20,6 +20,35 @@ export const API_BASE = joinUrl(RUNTIME_CLIENT_ORIGIN, PUBLIC_PREFIX);
 export const RUNTIME_API_BASE = joinUrl(RUNTIME_CLIENT_ORIGIN, RUNTIME_PREFIX);
 export const REPORT_API_BASE = API_BASE;
 
+type ErrorPayload = { message?: string; cause?: string; trace_id?: string };
+
+async function apiFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+  const method = (init.method || (input instanceof Request ? input.method : 'GET')).toUpperCase();
+  const url = input instanceof Request ? input.url : String(input);
+  try {
+    const response = await window.fetch(input, init);
+    if (!response.ok) {
+      const payload = await response.clone().json().catch(() => ({} as ErrorPayload)) as ErrorPayload;
+      console.error('[Athena API] request failed', {
+        method,
+        url,
+        status: response.status,
+        traceId: payload.trace_id || response.headers.get('X-Trace-Id') || response.headers.get('X-Request-Id') || '',
+        message: payload.message || response.statusText,
+        cause: payload.cause || '',
+      });
+    }
+    return response;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      console.info('[Athena API] request canceled', { method, url });
+      throw error;
+    }
+    console.error('[Athena API] network request failed', { method, url, error });
+    throw error;
+  }
+}
+
 export interface ApiResponse<T = any> {
   code: number;
   message: string;
@@ -33,7 +62,8 @@ async function readJson<T = any>(res: Response): Promise<T> {
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
     const message = json.message || `Request failed: ${res.status}`;
-    throw new Error(json.trace_id ? `${message} (Trace ID: ${json.trace_id})` : message);
+    const traceId = json.trace_id || res.headers.get('X-Trace-Id') || res.headers.get('X-Request-Id');
+    throw new Error(traceId ? `${message} (Trace ID: ${traceId})` : message);
   }
   return json.data ?? json;
 }
@@ -53,23 +83,23 @@ export function resolveRuntimeAssetUrl(path?: string) {
 
 export const authApi = {
   async login(username: string, password: string): Promise<AuthResult> {
-    const res = await fetch(`${API_BASE}/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) });
+    const res = await apiFetch(`${API_BASE}/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) });
     return readJson<AuthResult>(res);
   },
   async register(username: string, password: string, nickname: string): Promise<AuthResult> {
-    const res = await fetch(`${API_BASE}/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password, nickname }) });
+    const res = await apiFetch(`${API_BASE}/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password, nickname }) });
     return readJson<AuthResult>(res);
   },
   async me(): Promise<AuthResult['user']> {
-    return readJson<AuthResult['user']>(await fetch(`${API_BASE}/auth/me`));
+    return readJson<AuthResult['user']>(await apiFetch(`${API_BASE}/auth/me`));
   },
   async logout(): Promise<void> {
-    await readJson(await fetch(`${API_BASE}/auth/logout`, { method: 'POST' }));
+    await readJson(await apiFetch(`${API_BASE}/auth/logout`, { method: 'POST' }));
   },
   async uploadAvatar(file: File): Promise<AuthResult['user']> {
     const form = new FormData();
     form.append('avatar', file);
-    return readJson<AuthResult['user']>(await fetch(`${API_BASE}/auth/me/avatar`, { method: 'PUT', body: form }));
+    return readJson<AuthResult['user']>(await apiFetch(`${API_BASE}/auth/me/avatar`, { method: 'PUT', body: form }));
   },
 };
 
@@ -88,15 +118,15 @@ export interface AgentMemory {
 
 export const memoryApi = {
   async findAll(params: { agent_id?: string; session_id?: string; limit?: number } = {}): Promise<AgentMemory[]> {
-    const res = await fetch(`${API_BASE}/memory/all`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(params) });
+    const res = await apiFetch(`${API_BASE}/memory/all`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(params) });
     return readJson<AgentMemory[]>(res);
   },
   async create(data: Omit<AgentMemory, 'ulid' | 'created_at' | 'updated_at'>): Promise<AgentMemory> {
-    const res = await fetch(`${API_BASE}/memory`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+    const res = await apiFetch(`${API_BASE}/memory`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
     return readJson<AgentMemory>(res);
   },
   async delete(ulid: string): Promise<void> {
-    await readJson(await fetch(`${API_BASE}/memory/${ulid}`, { method: 'DELETE' }));
+    await readJson(await apiFetch(`${API_BASE}/memory/${ulid}`, { method: 'DELETE' }));
   },
 };
 
@@ -276,11 +306,11 @@ export interface ConfigSaveResult {
 
 export const configApi = {
   async getAppConfig(): Promise<ConfigDocument> {
-    return readJson<ConfigDocument>(await fetch(`${API_BASE}/config/app`));
+    return readJson<ConfigDocument>(await apiFetch(`${API_BASE}/config/app`));
   },
 
   async saveAppConfig(content: string): Promise<ConfigSaveResult> {
-    const res = await fetch(`${API_BASE}/config/app`, {
+    const res = await apiFetch(`${API_BASE}/config/app`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content }),
@@ -289,11 +319,11 @@ export const configApi = {
   },
 
   async getSkillsConfig(): Promise<ConfigDocument> {
-    return readJson<ConfigDocument>(await fetch(`${API_BASE}/config/skills`));
+    return readJson<ConfigDocument>(await apiFetch(`${API_BASE}/config/skills`));
   },
 
   async saveSkillsConfig(content: string): Promise<ConfigSaveResult> {
-    const res = await fetch(`${API_BASE}/config/skills`, {
+    const res = await apiFetch(`${API_BASE}/config/skills`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content }),
@@ -302,45 +332,45 @@ export const configApi = {
   },
 
   async getStatus(): Promise<ConfigStatus> {
-    return readJson<ConfigStatus>(await fetch(`${API_BASE}/config/status`));
+    return readJson<ConfigStatus>(await apiFetch(`${API_BASE}/config/status`));
   },
 
   async checkRestart(target: 'client' | 'runtime'): Promise<{ target: string; conflicts: PortConflict[] }> {
-    return readJson(await fetch(`${API_BASE}/config/restart/check?target=${target}`));
+    return readJson(await apiFetch(`${API_BASE}/config/restart/check?target=${target}`));
   },
 
   async restart(killPids: number[] = []): Promise<void> {
-    await readJson(await fetch(`${API_BASE}/config/restart`, {
+    await readJson(await apiFetch(`${API_BASE}/config/restart`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kill_pids: killPids }),
     }));
   },
 
   async getRuntimeConfig(): Promise<ConfigDocument> {
-    return readJson<ConfigDocument>(await fetch(`${API_BASE}/config/runtime`));
+    return readJson<ConfigDocument>(await apiFetch(`${API_BASE}/config/runtime`));
   },
 
   async saveRuntimeConfig(content: string): Promise<ConfigSaveResult> {
-    return readJson<ConfigSaveResult>(await fetch(`${API_BASE}/config/runtime`, {
+    return readJson<ConfigSaveResult>(await apiFetch(`${API_BASE}/config/runtime`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content }),
     }));
   },
 
   async getRuntimeSkillsConfig(): Promise<ConfigDocument> {
-    return readJson<ConfigDocument>(await fetch(`${API_BASE}/config/runtime/skills`));
+    return readJson<ConfigDocument>(await apiFetch(`${API_BASE}/config/runtime/skills`));
   },
 
   async saveRuntimeSkillsConfig(content: string): Promise<ConfigSaveResult> {
-    return readJson<ConfigSaveResult>(await fetch(`${API_BASE}/config/runtime/skills`, {
+    return readJson<ConfigSaveResult>(await apiFetch(`${API_BASE}/config/runtime/skills`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content }),
     }));
   },
 
   async getRuntimeStatus(): Promise<RuntimeConfigStatus> {
-    return readJson<RuntimeConfigStatus>(await fetch(`${API_BASE}/config/runtime/status`));
+    return readJson<RuntimeConfigStatus>(await apiFetch(`${API_BASE}/config/runtime/status`));
   },
 
   async restartRuntime(killPids: number[] = []): Promise<void> {
-    await readJson(await fetch(`${API_BASE}/config/runtime/restart`, {
+    await readJson(await apiFetch(`${API_BASE}/config/runtime/restart`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kill_pids: killPids }),
     }));
   },
@@ -356,7 +386,7 @@ export const modelApi = {
     category: string;
     contextWindow?: string;
   }): Promise<{ ulid: string }> {
-    const res = await fetch(`${API_BASE}/model`, {
+    const res = await apiFetch(`${API_BASE}/model`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -379,7 +409,7 @@ export const modelApi = {
     latency?: string;
     contextWindow?: string;
   }): Promise<void> {
-    const res = await fetch(`${API_BASE}/model/${ulid}`, {
+    const res = await apiFetch(`${API_BASE}/model/${ulid}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -391,7 +421,7 @@ export const modelApi = {
   },
 
   async delete(ulid: string): Promise<void> {
-    const res = await fetch(`${API_BASE}/model/${ulid}`, {
+    const res = await apiFetch(`${API_BASE}/model/${ulid}`, {
       method: 'DELETE',
     });
     if (!res.ok) {
@@ -401,7 +431,7 @@ export const modelApi = {
   },
 
   async findById(ulid: string): Promise<Model> {
-    const res = await fetch(`${API_BASE}/model/${ulid}`);
+    const res = await apiFetch(`${API_BASE}/model/${ulid}`);
     const json = await res.json();
     if (!res.ok) {
       throw new Error(json.message || 'Failed to find model');
@@ -411,7 +441,7 @@ export const modelApi = {
   },
 
   async findAll(modelType?: 'llm' | 'embedding' | 'image', includeDisabled = false): Promise<Model[]> {
-    const res = await fetch(`${API_BASE}/model/all`, {
+    const res = await apiFetch(`${API_BASE}/model/all`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ modelType }),
@@ -426,11 +456,11 @@ export const modelApi = {
   },
 
 	async findAdminAll(): Promise<Model[]> {
-		return readJson<Model[]>(await fetch(`${API_BASE}/model/admin/all`));
+		return readJson<Model[]>(await apiFetch(`${API_BASE}/model/admin/all`));
 	},
 
 	async updateEnabled(ulid: string, enabled: boolean): Promise<void> {
-		await readJson(await fetch(`${API_BASE}/model/${ulid}/enabled`, {
+		await readJson(await apiFetch(`${API_BASE}/model/${ulid}/enabled`, {
 			method: 'PUT',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ enabled }),
@@ -438,7 +468,7 @@ export const modelApi = {
 	},
 
 	async updateRuntimeMode(ulid: string, runtimeMode: ModelRuntimeMode): Promise<void> {
-		await readJson(await fetch(`${API_BASE}/model/${ulid}/runtime-mode`, {
+		await readJson(await apiFetch(`${API_BASE}/model/${ulid}/runtime-mode`, {
 			method: 'PUT',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ runtimeMode }),
@@ -450,7 +480,7 @@ export const modelApi = {
     if (params?.modelType) search.set('modelType', params.modelType);
     if (params?.provider) search.set('provider', params.provider);
     const qs = search.toString();
-    const res = await fetch(`${API_BASE}/model/catalog${qs ? `?${qs}` : ''}`);
+    const res = await apiFetch(`${API_BASE}/model/catalog${qs ? `?${qs}` : ''}`);
     const json = await res.json();
     if (!res.ok) {
       throw new Error(json.message || 'Failed to find model catalog');
@@ -459,35 +489,35 @@ export const modelApi = {
   },
 
   async localEnvironment(catalogId: string): Promise<LocalModelEnvironment> {
-    return readJson<LocalModelEnvironment>(await fetch(`${API_BASE}/model/catalog/${catalogId}/environment`));
+    return readJson<LocalModelEnvironment>(await apiFetch(`${API_BASE}/model/catalog/${catalogId}/environment`));
   },
 
   async installLocal(catalogId: string): Promise<{ jobId: string }> {
-    return readJson<{ jobId: string }>(await fetch(`${API_BASE}/model/catalog/${catalogId}/install`, { method: 'POST' }));
+    return readJson<{ jobId: string }>(await apiFetch(`${API_BASE}/model/catalog/${catalogId}/install`, { method: 'POST' }));
   },
 
   async installJob(jobId: string): Promise<LocalModelInstallJob> {
-    return readJson<LocalModelInstallJob>(await fetch(`${API_BASE}/model/install/${jobId}`));
+    return readJson<LocalModelInstallJob>(await apiFetch(`${API_BASE}/model/install/${jobId}`));
   },
 
   async trainingEnvironment(): Promise<ModelTrainingEnvironment> {
-    return readJson<ModelTrainingEnvironment>(await fetch(`${API_BASE}/model/training/environment`));
+    return readJson<ModelTrainingEnvironment>(await apiFetch(`${API_BASE}/model/training/environment`));
   },
 
   async createTraining(form: FormData): Promise<ModelTrainingJob> {
-    return readJson<ModelTrainingJob>(await fetch(`${API_BASE}/model/training`, { method: 'POST', body: form }));
+    return readJson<ModelTrainingJob>(await apiFetch(`${API_BASE}/model/training`, { method: 'POST', body: form }));
   },
 
   async trainingJobs(): Promise<ModelTrainingJob[]> {
-    return readJson<ModelTrainingJob[]>(await fetch(`${API_BASE}/model/training`));
+    return readJson<ModelTrainingJob[]>(await apiFetch(`${API_BASE}/model/training`));
   },
 
   async trainingJob(jobId: string): Promise<ModelTrainingJob> {
-    return readJson<ModelTrainingJob>(await fetch(`${API_BASE}/model/training/${jobId}`));
+    return readJson<ModelTrainingJob>(await apiFetch(`${API_BASE}/model/training/${jobId}`));
   },
 
   async cancelTraining(jobId: string): Promise<void> {
-    await readJson(await fetch(`${API_BASE}/model/training/${jobId}/cancel`, { method: 'POST' }));
+    await readJson(await apiFetch(`${API_BASE}/model/training/${jobId}/cancel`, { method: 'POST' }));
   },
 
   async findPage(params: {
@@ -495,7 +525,7 @@ export const modelApi = {
     page_data?: { page: number; page_size: number };
     sort_data?: { field: string; order: 'asc' | 'desc' };
   }): Promise<{ entries: Model[]; page_data: { page: number; page_size: number; total: number } }> {
-    const res = await fetch(`${API_BASE}/model/page`, {
+    const res = await apiFetch(`${API_BASE}/model/page`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params),
@@ -511,16 +541,16 @@ export const modelApi = {
 
 export const modelKeyApi = {
 	async findAll(): Promise<ModelKey[]> {
-		return readJson<ModelKey[]>(await fetch(`${API_BASE}/model-key/all`));
+		return readJson<ModelKey[]>(await apiFetch(`${API_BASE}/model-key/all`));
 	},
 	async create(data: { name: string; provider: string; apiKey: string; baseUrl?: string }): Promise<ModelKey> {
-		return readJson<ModelKey>(await fetch(`${API_BASE}/model-key`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }));
+		return readJson<ModelKey>(await apiFetch(`${API_BASE}/model-key`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }));
 	},
 	async update(ulid: string, data: { name?: string; provider?: string; apiKey?: string; baseUrl?: string; enabled?: boolean }): Promise<void> {
-		await readJson(await fetch(`${API_BASE}/model-key/${ulid}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }));
+		await readJson(await apiFetch(`${API_BASE}/model-key/${ulid}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }));
 	},
 	async delete(ulid: string): Promise<void> {
-		await readJson(await fetch(`${API_BASE}/model-key/${ulid}`, { method: 'DELETE' }));
+		await readJson(await apiFetch(`${API_BASE}/model-key/${ulid}`, { method: 'DELETE' }));
 	},
 };
 
@@ -551,7 +581,7 @@ export const knowledgeBaseApi = {
     token?: string;
     enabled?: boolean;
   }): Promise<{ ulid: string }> {
-    const res = await fetch(`${API_BASE}/knowledge_base`, {
+    const res = await apiFetch(`${API_BASE}/knowledge_base`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -570,7 +600,7 @@ export const knowledgeBaseApi = {
     token?: string;
     enabled?: boolean;
   }): Promise<void> {
-    const res = await fetch(`${API_BASE}/knowledge_base/${ulid}`, {
+    const res = await apiFetch(`${API_BASE}/knowledge_base/${ulid}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -582,7 +612,7 @@ export const knowledgeBaseApi = {
   },
 
   async delete(ulid: string): Promise<void> {
-    const res = await fetch(`${API_BASE}/knowledge_base/${ulid}`, {
+    const res = await apiFetch(`${API_BASE}/knowledge_base/${ulid}`, {
       method: 'DELETE',
     });
     if (!res.ok) {
@@ -592,7 +622,7 @@ export const knowledgeBaseApi = {
   },
 
   async findById(ulid: string): Promise<KnowledgeBase> {
-    const res = await fetch(`${API_BASE}/knowledge_base/${ulid}`);
+    const res = await apiFetch(`${API_BASE}/knowledge_base/${ulid}`);
     const json = await res.json();
     if (!res.ok) {
       throw new Error(json.message || 'Failed to find knowledge base');
@@ -601,7 +631,7 @@ export const knowledgeBaseApi = {
   },
 
   async findAll(): Promise<KnowledgeBase[]> {
-    const res = await fetch(`${API_BASE}/knowledge_base/all`, {
+    const res = await apiFetch(`${API_BASE}/knowledge_base/all`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
@@ -614,7 +644,7 @@ export const knowledgeBaseApi = {
   },
 
   async recallTest(ulid: string, query: string, topK: number = 5): Promise<RecallResult[]> {
-    const res = await fetch(`${API_BASE}/knowledge_base/${ulid}/recall`, {
+    const res = await apiFetch(`${API_BASE}/knowledge_base/${ulid}/recall`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ query, top_k: topK }),
@@ -641,7 +671,7 @@ export interface CommandResult {
 
 export const commandApi = {
   async execute(command: string, options: { agentId?: string; sessionId?: string } = {}): Promise<CommandResult> {
-    const res = await fetch(`${API_BASE}/command/execute`, {
+    const res = await apiFetch(`${API_BASE}/command/execute`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ command, agent_id: options.agentId, session_id: options.sessionId }),
@@ -703,12 +733,12 @@ function extractTextFromRunResult(data: any): string {
 
 export const workspaceApi = {
   async selectFolder(): Promise<{ path: string }> {
-    const res = await fetch(`${API_BASE}/workspace/select-folder`);
+    const res = await apiFetch(`${API_BASE}/workspace/select-folder`);
     return readJson(res);
   },
 
   async import(path: string): Promise<WorkspaceInfo> {
-    const res = await fetch(`${API_BASE}/workspace/import`, {
+    const res = await apiFetch(`${API_BASE}/workspace/import`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path }),
@@ -723,18 +753,18 @@ export const workspaceApi = {
   }> {
     const qs = new URLSearchParams();
     if (path) qs.set('path', path);
-    const res = await fetch(`${API_BASE}/workspace/${id}/tree${qs.toString() ? `?${qs}` : ''}`);
+    const res = await apiFetch(`${API_BASE}/workspace/${id}/tree${qs.toString() ? `?${qs}` : ''}`);
     return readJson(res);
   },
 
   async readFile(id: string, path: string): Promise<{ path: string; content: string; size: number; line_count: number }> {
     const qs = new URLSearchParams({ path });
-    const res = await fetch(`${API_BASE}/workspace/${id}/file?${qs}`);
+    const res = await apiFetch(`${API_BASE}/workspace/${id}/file?${qs}`);
     return readJson(res);
   },
 
   async search(id: string, query: string): Promise<{ hits: WorkspaceSearchHit[] }> {
-    const res = await fetch(`${API_BASE}/workspace/${id}/search`, {
+    const res = await apiFetch(`${API_BASE}/workspace/${id}/search`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ query }),
@@ -743,7 +773,7 @@ export const workspaceApi = {
   },
 
   async context(id: string, query: string, limit = 6): Promise<{ files: WorkspaceContextFile[] }> {
-    const res = await fetch(`${API_BASE}/workspace/${id}/context`, {
+    const res = await apiFetch(`${API_BASE}/workspace/${id}/context`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ query, limit }),
@@ -752,7 +782,7 @@ export const workspaceApi = {
   },
 
   async buildPatch(id: string, changes: WorkspaceEditChange[]): Promise<{ patch: string }> {
-    const res = await fetch(`${API_BASE}/workspace/${id}/build-patch`, {
+    const res = await apiFetch(`${API_BASE}/workspace/${id}/build-patch`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ changes }),
@@ -761,7 +791,7 @@ export const workspaceApi = {
   },
 
   async applyPatch(id: string, patch: string, dryRun = false): Promise<{ applied: boolean }> {
-    const res = await fetch(`${API_BASE}/workspace/${id}/apply-patch`, {
+    const res = await apiFetch(`${API_BASE}/workspace/${id}/apply-patch`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ patch, dry_run: dryRun }),
@@ -770,7 +800,7 @@ export const workspaceApi = {
   },
 
   async generatePatch(prompt: string, agentId?: string, signal?: AbortSignal): Promise<string> {
-    const res = await fetch(`${RUNTIME_API_BASE}/run`, {
+    const res = await apiFetch(`${RUNTIME_API_BASE}/run`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -817,7 +847,7 @@ export const skillApi = {
     enabled?: boolean;
     config?: string;
   }): Promise<{ ulid: string }> {
-    const res = await fetch(`${API_BASE}/skill`, {
+    const res = await apiFetch(`${API_BASE}/skill`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -838,7 +868,7 @@ export const skillApi = {
     enabled?: boolean;
     config?: string;
   }): Promise<void> {
-    const res = await fetch(`${API_BASE}/skill/${ulid}`, {
+    const res = await apiFetch(`${API_BASE}/skill/${ulid}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -850,7 +880,7 @@ export const skillApi = {
   },
 
   async delete(ulid: string): Promise<void> {
-    const res = await fetch(`${API_BASE}/skill/${ulid}`, {
+    const res = await apiFetch(`${API_BASE}/skill/${ulid}`, {
       method: 'DELETE',
     });
     if (!res.ok) {
@@ -860,7 +890,7 @@ export const skillApi = {
   },
 
   async findById(ulid: string): Promise<Skill> {
-    const res = await fetch(`${API_BASE}/skill/${ulid}`);
+    const res = await apiFetch(`${API_BASE}/skill/${ulid}`);
     const json = await res.json();
     if (!res.ok) {
       throw new Error(json.message || 'Failed to find skill');
@@ -869,7 +899,7 @@ export const skillApi = {
   },
 
   async findAll(params?: { skill_type?: string; name?: string }): Promise<Skill[]> {
-    const res = await fetch(`${API_BASE}/skill/all`, {
+    const res = await apiFetch(`${API_BASE}/skill/all`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params || {}),
@@ -886,7 +916,7 @@ export const skillApi = {
     page_data?: { page: number; page_size: number };
     sort_data?: { field: string; order: 'asc' | 'desc' };
   }): Promise<{ entries: Skill[]; page_data: { page: number; page_size: number; total: number } }> {
-    const res = await fetch(`${API_BASE}/skill/page`, {
+    const res = await apiFetch(`${API_BASE}/skill/page`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params),
@@ -899,7 +929,7 @@ export const skillApi = {
   },
 
   async checkName(name: string): Promise<CheckSkillNameResult> {
-    const res = await fetch(`${API_BASE}/skill/check-name`, {
+    const res = await apiFetch(`${API_BASE}/skill/check-name`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name }),
@@ -915,7 +945,7 @@ export const skillApi = {
     const formData = new FormData();
     formData.append('file', file);
 
-    const res = await fetch(`${API_BASE}/skill/upload`, {
+    const res = await apiFetch(`${API_BASE}/skill/upload`, {
       method: 'POST',
       body: formData,
     });
@@ -930,7 +960,7 @@ export const skillApi = {
 
 export const agentApi = {
   async findAll(): Promise<Agent[]> {
-    const res = await fetch(`${API_BASE}/agent/all`, {
+    const res = await apiFetch(`${API_BASE}/agent/all`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
@@ -943,7 +973,7 @@ export const agentApi = {
   },
 
   async findById(ulid: string): Promise<Agent> {
-    const res = await fetch(`${API_BASE}/agent/${ulid}`, {
+    const res = await apiFetch(`${API_BASE}/agent/${ulid}`, {
       method: 'GET',
     });
     const json = await res.json();
@@ -954,7 +984,7 @@ export const agentApi = {
   },
 
   async create(agent: Partial<Agent>): Promise<{ ulid: string }> {
-    const res = await fetch(`${API_BASE}/agent`, {
+    const res = await apiFetch(`${API_BASE}/agent`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(agent),
@@ -967,7 +997,7 @@ export const agentApi = {
   },
 
   async update(ulid: string, agent: Partial<Agent>): Promise<void> {
-    const res = await fetch(`${API_BASE}/agent/${ulid}`, {
+    const res = await apiFetch(`${API_BASE}/agent/${ulid}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(agent),
@@ -982,7 +1012,7 @@ export const agentApi = {
   },
 
   async delete(ulid: string): Promise<void> {
-    const res = await fetch(`${API_BASE}/agent/${ulid}`, {
+    const res = await apiFetch(`${API_BASE}/agent/${ulid}`, {
       method: 'DELETE',
     });
     if (!res.ok) {
@@ -992,7 +1022,7 @@ export const agentApi = {
   },
 
   async updateEnabled(ulid: string, enabled: boolean): Promise<void> {
-    const res = await fetch(`${API_BASE}/agent/${ulid}/enabled`, {
+    const res = await apiFetch(`${API_BASE}/agent/${ulid}/enabled`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ulid, enabled }),
@@ -1014,7 +1044,7 @@ export const agentApi = {
     config_json?: string;
     enabled: boolean;
   }): Promise<{ ulid: string }> {
-    const res = await fetch(`${API_BASE}/agent/upload`, {
+    const res = await apiFetch(`${API_BASE}/agent/upload`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(config),
@@ -1044,7 +1074,7 @@ export interface Channel {
 
 export const channelApi = {
   async findAll(): Promise<Channel[]> {
-    const res = await fetch(`${API_BASE}/channel/all`, {
+    const res = await apiFetch(`${API_BASE}/channel/all`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
@@ -1399,7 +1429,7 @@ export const chatApi = {
   // Runner API - for agent execution
   async runAgent(data: RunAgentParams): Promise<any> {
     const body = await buildRunRequest(data);
-    const res = await fetch(`${RUNTIME_API_BASE}/run`, {
+    const res = await apiFetch(`${RUNTIME_API_BASE}/run`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...body, options: { ...(body.options || {}), stream: false } }),
@@ -1411,7 +1441,7 @@ export const chatApi = {
   // Runner API - streaming version that returns raw Response for SSE
   async runAgentStream(data: RunAgentParams): Promise<Response> {
     const body = await buildRunRequest(data);
-    const res = await fetch(`${RUNTIME_API_BASE}/run/stream`, {
+    const res = await apiFetch(`${RUNTIME_API_BASE}/run/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -1434,7 +1464,7 @@ export const chatApi = {
           approved: data.approved,
           disapprove_reason: data.approved ? undefined : data.reason,
         }];
-    const res = await fetch(`${RUNTIME_API_BASE}/resume`, {
+    const res = await apiFetch(`${RUNTIME_API_BASE}/resume`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1448,7 +1478,7 @@ export const chatApi = {
 
   // Stop agent execution
   async stopAgent(checkpoint_id: string, session_id?: string): Promise<{ stopped: boolean }> {
-    const res = await fetch(`${RUNTIME_API_BASE}/stop`, {
+    const res = await apiFetch(`${RUNTIME_API_BASE}/stop`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ checkpoint_id, session_id }),
@@ -1479,12 +1509,12 @@ export const chatApi = {
 
   // Job execution APIs
   async getJobExecutions(agentId: string, limit: number = 50): Promise<any> {
-    const res = await fetch(`${API_BASE}/job/execution/byAgentId?agent_id=${agentId}&limit=${limit}`);
+    const res = await apiFetch(`${API_BASE}/job/execution/byAgentId?agent_id=${agentId}&limit=${limit}`);
     return readJson(res);
   },
 
   async getJobExecutionDetail(ulid: string): Promise<any> {
-    const res = await fetch(`${API_BASE}/job/execution/${ulid}`);
+    const res = await apiFetch(`${API_BASE}/job/execution/${ulid}`);
     return readJson(res);
   },
 };
@@ -1516,7 +1546,7 @@ export const dashboardApi = {
   // Dashboard 统计概览
   async getOverview(): Promise<DashboardOverview | null> {
     try {
-      const res = await fetch(`${API_BASE}/dashboard/overview`);
+      const res = await apiFetch(`${API_BASE}/dashboard/overview`);
       return await readJson(res);
     } catch (e) {
       console.error('getOverview failed:', e);
@@ -1527,7 +1557,7 @@ export const dashboardApi = {
   // Token 使用排行
   async getTokenUsageRanking(limit: number = 10): Promise<TokenUsageItem[]> {
     try {
-      const res = await fetch(`${API_BASE}/dashboard/token-ranking?limit=${limit}`);
+      const res = await apiFetch(`${API_BASE}/dashboard/token-ranking?limit=${limit}`);
       const data = await readJson<any>(res);
       // Handle both array and object response
       if (Array.isArray(data)) return data;
@@ -1542,7 +1572,7 @@ export const dashboardApi = {
   // 渠道活动统计
   async getChannelActivity(): Promise<ChannelActivityItem[]> {
     try {
-      const res = await fetch(`${API_BASE}/dashboard/channel-activity`);
+      const res = await apiFetch(`${API_BASE}/dashboard/channel-activity`);
       const data = await readJson<any>(res);
       // Handle both array and object response
       if (Array.isArray(data)) return data;
@@ -1557,7 +1587,7 @@ export const dashboardApi = {
   // 最近会话
   async getRecentSessions(limit: number = 10): Promise<ChatSession[]> {
     try {
-      const res = await fetch(`${API_BASE}/dashboard/recent-sessions?limit=${limit}`);
+      const res = await apiFetch(`${API_BASE}/dashboard/recent-sessions?limit=${limit}`);
       const data = await readJson<any>(res);
       if (Array.isArray(data)) return data;
       if (data.sessions && Array.isArray(data.sessions)) return data.sessions;
