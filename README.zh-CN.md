@@ -62,7 +62,7 @@ npm run dev
 
 打开 [http://localhost:3000](http://localhost:3000)。
 
-后端默认创建的开发管理员账号和密码都是 `athena`。如果不只在可信本机环境中使用，请立即修改密码。
+后端默认创建的开发管理员账号和密码都是 `athena`。该账号仅在不存在时初始化，重启不会重置已修改的密码。如果不只在可信本机环境中使用，请立即替换默认密码。
 
 不要通过 `file://` 双击打开 `index.html`。Vite 构建使用 ES Module 和浏览器路由，必须通过 `npm run dev`、`npm run preview`、Nginx 或 Athena Launcher 以 HTTP 方式提供页面。
 
