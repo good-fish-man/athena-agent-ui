@@ -61,12 +61,34 @@ function voiceQualityScore(voice: SpeechSynthesisVoice, language: string) {
   return score;
 }
 
+export const AVATAR_PRESETS = [
+  { id: 'mira', gender: 'female', skin: '#f2c6a0', skinShadow: '#e0a97f', hair: '#3f2a20', hairLight: '#5c3d2e', cloth: '#0f766e', clothDark: '#0b5851', blush: '#f4a6a0' },
+  { id: 'leo', gender: 'male', skin: '#e9b489', skinShadow: '#d29a6c', hair: '#211814', hairLight: '#3a2a20', cloth: '#1e3a8a', clothDark: '#172c69', blush: '#e79b93' },
+  { id: 'yuki', gender: 'female', skin: '#f7d7bd', skinShadow: '#eab892', hair: '#6d4c9f', hairLight: '#8a68bd', cloth: '#be185d', clothDark: '#921247', blush: '#f6a8b6' },
+  { id: 'kai', gender: 'male', skin: '#c68642', skinShadow: '#a86d30', hair: '#0e0b0a', hairLight: '#2a211d', cloth: '#0e7490', clothDark: '#0a5a72', blush: '#c9765f' },
+] as const;
+
+export type AvatarPreset = (typeof AVATAR_PRESETS)[number];
+export type AvatarId = AvatarPreset['id'];
+// The selected avatar can be a built-in preset id or a custom upload id (custom:<uuid>).
+export type SelectedAvatarId = string;
+
+const DEFAULT_AVATAR_ID: AvatarId = AVATAR_PRESETS[0].id;
+
+function storedAvatarId(): SelectedAvatarId {
+  const value = localStorage.getItem('chat.voice.avatarId');
+  return value && value.trim() ? value : DEFAULT_AVATAR_ID;
+}
+
 export function useVoiceConversation({ onTranscript, onFinalTranscript, language }: VoiceConversationOptions) {
   const [isListening, setIsListening] = React.useState(false);
   const [isSpeaking, setIsSpeaking] = React.useState(false);
+  const [speakingText, setSpeakingText] = React.useState('');
   const [voiceError, setVoiceError] = React.useState('');
   const [autoSpeak, setAutoSpeak] = React.useState(() => localStorage.getItem('chat.voice.autoSpeak') === 'true');
   const [conversationMode, setConversationMode] = React.useState(() => localStorage.getItem('chat.voice.conversationMode') === 'true');
+  const [avatarEnabled, setAvatarEnabled] = React.useState(() => localStorage.getItem('chat.voice.avatarEnabled') !== 'false');
+  const [avatarId, setAvatarId] = React.useState<SelectedAvatarId>(storedAvatarId);
   const [voices, setVoices] = React.useState<SpeechSynthesisVoice[]>([]);
   const [selectedVoiceURI, setSelectedVoiceURI] = React.useState(() => localStorage.getItem('chat.voice.voiceURI') || '');
   const [speechRate, setSpeechRate] = React.useState(() => storedNumber('chat.voice.rate', 0.95));
@@ -100,6 +122,14 @@ export function useVoiceConversation({ onTranscript, onFinalTranscript, language
   React.useEffect(() => {
     localStorage.setItem('chat.voice.autoSpeak', String(autoSpeak));
   }, [autoSpeak]);
+
+  React.useEffect(() => {
+    localStorage.setItem('chat.voice.avatarEnabled', String(avatarEnabled));
+  }, [avatarEnabled]);
+
+  React.useEffect(() => {
+    localStorage.setItem('chat.voice.avatarId', avatarId);
+  }, [avatarId]);
 
   React.useEffect(() => {
     if (!synthesisSupported) return;
@@ -148,6 +178,7 @@ export function useVoiceConversation({ onTranscript, onFinalTranscript, language
   const stopSpeaking = React.useCallback(() => {
     if (synthesisSupported) window.speechSynthesis.cancel();
     setIsSpeaking(false);
+    setSpeakingText('');
   }, [synthesisSupported]);
 
   const startListening = React.useCallback(() => {
@@ -243,6 +274,7 @@ export function useVoiceConversation({ onTranscript, onFinalTranscript, language
     window.speechSynthesis.cancel();
     setVoiceError('');
     setIsSpeaking(true);
+    setSpeakingText(speechText(text));
 
     const locale = language || navigator.language || 'zh-CN';
     const selectedVoice = voices.find(voice => voice.voiceURI === selectedVoiceURI)
@@ -252,6 +284,7 @@ export function useVoiceConversation({ onTranscript, onFinalTranscript, language
     const playNext = () => {
       if (index >= chunks.length) {
         setIsSpeaking(false);
+        setSpeakingText('');
         if (resumeConversation && conversationModeRef.current) {
           // Leave enough time for the speaker tail to decay before reopening the mic.
           window.setTimeout(() => startListeningRef.current(), 700);
@@ -267,6 +300,7 @@ export function useVoiceConversation({ onTranscript, onFinalTranscript, language
       utterance.onend = playNext;
       utterance.onerror = () => {
         setIsSpeaking(false);
+        setSpeakingText('');
         setVoiceError('语音朗读失败。');
       };
       window.speechSynthesis.speak(utterance);
@@ -287,9 +321,12 @@ export function useVoiceConversation({ onTranscript, onFinalTranscript, language
     synthesisSupported,
     isListening,
     isSpeaking,
+    speakingText,
     voiceError,
     autoSpeak,
     conversationMode,
+    avatarEnabled,
+    avatarId,
     voices,
     selectedVoiceURI,
     speechRate,
@@ -297,6 +334,8 @@ export function useVoiceConversation({ onTranscript, onFinalTranscript, language
     silenceTimeoutMs,
     setAutoSpeak,
     setConversationMode,
+    setAvatarEnabled,
+    setAvatarId,
     setSelectedVoiceURI,
     setSpeechRate,
     setSpeechPitch,

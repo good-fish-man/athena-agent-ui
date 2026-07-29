@@ -15,6 +15,7 @@ import {
   Inbox,
   LogOut,
   Camera,
+  WandSparkles,
   Loader2
 } from 'lucide-react';
 import { cn } from '../lib/utils';
@@ -85,6 +86,7 @@ export function Sidebar({ activeView, onViewChange, user, onUserChange, onLogout
       label: t('sidebar.groupWork'),
       items: [
         { id: 'chat', label: t('sidebar.chat'), description: t('sidebar.chatDesc'), icon: MessageSquare },
+        { id: 'media', label: t('sidebar.media'), description: t('sidebar.mediaDesc'), icon: WandSparkles },
         { id: 'workspace', label: t('sidebar.workspace'), description: t('sidebar.workspaceDesc'), icon: FolderCode },
       ],
     },

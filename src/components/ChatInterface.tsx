@@ -46,17 +46,22 @@ import {
   XCircle,
   Clock,
   Presentation,
-  Download
+  Download,
+  UserRound
 } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
 import { cn } from '../lib/utils';
 import { Message, FileInfo, Agent, Conversation, PendingApproval, ChatSession } from '../types';
-import { agentApi, chatApi, REPORT_API_BASE } from '../lib/api';
+import { agentApi, chatApi, REPORT_API_BASE, type RunHistoryMessage } from '../lib/api';
 import { useTranslation } from 'react-i18next';
 import { authStore } from '../lib/auth';
 import { useVoiceConversation } from '../hooks/useVoiceConversation';
+import VoiceCallStage from './VoiceCallStage';
+import { AVATAR_PRESETS } from '../hooks/useVoiceConversation';
+import { resolveAvatarSource } from './VoiceAvatar';
+import { useCustomAvatars } from '../hooks/useCustomAvatars';
 import { toast } from 'sonner';
 import { parseClarificationMessage, type ClarificationMessage } from '../lib/structuredMessage';
 
@@ -158,6 +163,7 @@ function ClarificationCard({ data, onAnswer }: { data: ClarificationMessage; onA
 function MessageContent({ content, htmlContent, reportUrl, pptUrl, onClarificationAnswer }: { content: string; htmlContent?: string; reportUrl?: string; pptUrl?: string; onClarificationAnswer?: (answer: string) => void }) {
   const { t } = useTranslation();
   const [iframeKey, setIframeKey] = React.useState(0);
+  content = stripImagePlanningMarkup(stripInternalControlTags(sanitizeImageToolResult(content)));
   const clarification = parseClarificationMessage(content);
 
   if (clarification) {
@@ -297,11 +303,222 @@ interface ChatInterfaceProps {
   onCreateAgent?: () => void;
 }
 
+const LAST_AGENT_KEY_PREFIX = 'athena:chat:lastAgentId:';
+
+function lastAgentStorageKey(userId?: string | null): string {
+  return `${LAST_AGENT_KEY_PREFIX}${userId || 'anonymous'}`;
+}
+
+function readLastAgentId(userId?: string | null): string | null {
+  try {
+    return localStorage.getItem(lastAgentStorageKey(userId));
+  } catch {
+    return null;
+  }
+}
+
+function writeLastAgentId(userId: string | null | undefined, agentId: string): void {
+  try {
+    if (agentId) localStorage.setItem(lastAgentStorageKey(userId), agentId);
+  } catch {
+    // ignore storage failures (private mode / quota)
+  }
+}
+
+// Max number of prior messages replayed to the runtime as conversation history.
+const HISTORY_MAX_MESSAGES = 20;
+// How many recent messages to scan when detecting prior image generation.
+const IMAGE_LOOKBACK_MESSAGES = 8;
+const MARKDOWN_IMAGE_RE = /!\[[^\]]*\]\((https?:\/\/[^\s)]+)\)/g;
+const GENERATED_IMAGE_HINT = '/generated/';
+const LEGACY_IMAGE_HISTORY_MARKER = '[One or more images were generated successfully for the preceding user request. Their URLs are intentionally omitted. For any requested change or variation, call GenerateImage again with a complete revised prompt.]';
+const INTERNAL_CONTROL_TAG_RE = /<\/?system[-_]reminder\b[^>]*>/i;
+const INTERNAL_CONTROL_TAG_RE_GLOBAL = /<\/?system[-_]reminder\b[^>]*>/gi;
+const IMAGE_PLANNING_TAG_RE = /<\/?(?:image|original_prompt)\b[^>]*>/gi;
+
+function extractImageUrls(content: string): string[] {
+  if (!content) return [];
+  const urls: string[] = [];
+  let match: RegExpExecArray | null;
+  MARKDOWN_IMAGE_RE.lastIndex = 0;
+  while ((match = MARKDOWN_IMAGE_RE.exec(content)) !== null) {
+    if (match[1]) urls.push(match[1]);
+  }
+  return urls;
+}
+
+function hasInternalControlTag(content: string): boolean {
+  return INTERNAL_CONTROL_TAG_RE.test(content || '');
+}
+
+function stripInternalControlTags(content: string): string {
+  return (content || '').replace(INTERNAL_CONTROL_TAG_RE_GLOBAL, '').trim();
+}
+
+function hasImagePlanningMarkup(content: string): boolean {
+  const value = content || '';
+  return /<image\b[^>]*>/i.test(value) && /<original_prompt\b[^>]*>/i.test(value);
+}
+
+function stripImagePlanningMarkup(content: string): string {
+  return hasImagePlanningMarkup(content)
+    ? (content || '').replace(IMAGE_PLANNING_TAG_RE, '').trim()
+    : content;
+}
+
+function hasStrippedInternalControlTag(message: Message): boolean {
+  if (!message.metadata) return false;
+  try {
+    return JSON.parse(message.metadata)?.internalControlTagStripped === true;
+  } catch {
+    return false;
+  }
+}
+
+function hasInvalidImagePlanningOutput(message: Message): boolean {
+  if (hasImagePlanningMarkup(message.content || '')) return true;
+  if (!message.metadata) return false;
+  try {
+    return JSON.parse(message.metadata)?.invalidImagePlanningOutput === true;
+  } catch {
+    return false;
+  }
+}
+
+function buildAssistantMetadata(
+  imageUrls: string[],
+  prompt: string,
+  internalControlTagStripped: boolean,
+  invalidImagePlanningOutput: boolean,
+): string | undefined {
+  const metadata: Record<string, unknown> = {};
+  if (imageUrls.length > 0) {
+    metadata.imageActions = imageUrls.map(url => ({ prompt, url }));
+  }
+  if (internalControlTagStripped) {
+    metadata.internalControlTagStripped = true;
+  }
+  if (invalidImagePlanningOutput) {
+    metadata.invalidImagePlanningOutput = true;
+  }
+  return Object.keys(metadata).length > 0 ? JSON.stringify(metadata) : undefined;
+}
+
+// Converts a single raw GenerateImage tool-result JSON object into its Markdown
+// image form. Returns null if the object isn't an image tool result.
+function imageJsonToMarkdown(raw: string): string | null {
+  try {
+    const obj = JSON.parse(raw);
+    if (obj && typeof obj === 'object' && (obj.image_url || obj.markdown)) {
+      if (typeof obj.markdown === 'string' && obj.markdown.trim()) return obj.markdown;
+      if (typeof obj.image_url === 'string' && obj.image_url.trim()) {
+        return `![Generated image](${obj.image_url})`;
+      }
+    }
+  } catch {
+    // not valid JSON
+  }
+  return null;
+}
+
+// Defensively rewrites any raw GenerateImage tool-result JSON that leaked into
+// assistant content into a clean Markdown image, so the UI never shows raw JSON
+// and the model is never re-fed JSON samples via replayed history.
+function sanitizeImageToolResult(content: string): string {
+  if (!content) return content;
+  const trimmed = content.trim();
+  const whole = imageJsonToMarkdown(trimmed);
+  if (whole !== null) return whole;
+  if (!content.includes('"image_url"')) return content;
+  return content.replace(/\{[^{}]*"image_url"[^{}]*\}/g, (blob) => {
+    const md = imageJsonToMarkdown(blob);
+    return md !== null ? md : blob;
+  });
+}
+
+function imageActions(message: Message): { prompt: string; url: string }[] {
+  if (!message.metadata) return [];
+  try {
+    const meta = JSON.parse(message.metadata);
+    if (!Array.isArray(meta.imageActions)) return [];
+    return meta.imageActions
+      .map((action: unknown) => {
+        if (!action || typeof action !== 'object') return null;
+        const prompt = 'prompt' in action && typeof action.prompt === 'string' ? action.prompt.trim() : '';
+        const url = 'url' in action && typeof action.url === 'string' ? action.url.trim() : '';
+        return url ? { prompt, url } : null;
+      })
+      .filter((action: { prompt: string; url: string } | null): action is { prompt: string; url: string } => action !== null);
+  } catch {
+    return [];
+  }
+}
+
+function imageActionUrls(message: Message): string[] {
+  return imageActions(message).map(action => action.url);
+}
+
+function isGeneratedImageMessage(message: Message): boolean {
+  const content = message.content || '';
+  return extractImageUrls(content).length > 0
+    || content.includes(GENERATED_IMAGE_HINT)
+    || imageActionUrls(message).length > 0;
+}
+
+function isLegacyImageHistoryMarker(message: Message): boolean {
+  return message.role === 'assistant'
+    && (message.content || '').includes(LEGACY_IMAGE_HISTORY_MARKER);
+}
+
+// Build the conversation history (prior turns) replayed to the runtime, capped
+// to the most recent HISTORY_MAX_MESSAGES completed user/assistant messages.
+function buildRunHistory(messages: Message[]): RunHistoryMessage[] {
+  const history: RunHistoryMessage[] = [];
+  let latestUserContent = '';
+  let imageContextIndex = 0;
+  for (const m of messages) {
+    if (m.role !== 'user' && m.role !== 'assistant') continue;
+    if (m.status === 'streaming' || m.status === 'failed') continue;
+    if (m.role === 'assistant' && isGeneratedImageMessage(m)) {
+      imageContextIndex += 1;
+      const actionPrompt = imageActions(m).map(action => action.prompt).filter(Boolean).pop();
+      const sourcePrompt = actionPrompt || latestUserContent;
+      history.push({
+        role: 'system',
+        content: `Image context image-${imageContextIndex} was generated successfully only for this request: ${JSON.stringify(sourcePrompt)}. It is independent from other image contexts. Its URL is omitted.`,
+      });
+      continue;
+    }
+    if (m.role === 'assistant' && isLegacyImageHistoryMarker(m)) continue;
+    if (m.role === 'assistant' && (hasInternalControlTag(m.content || '') || hasStrippedInternalControlTag(m))) {
+      continue;
+    }
+    if (m.role === 'assistant' && hasInvalidImagePlanningOutput(m)) continue;
+    const content = stripImagePlanningMarkup(sanitizeImageToolResult((m.content || '').trim())).trim();
+    if (!content) continue;
+    history.push({ role: m.role, content });
+    if (m.role === 'user') latestUserContent = content;
+  }
+  return history.slice(-HISTORY_MAX_MESSAGES);
+}
+
+// Returns true when a recent assistant turn generated an image, so the chat
+// model can be reminded that continuing/editing the drawing is possible.
+function hasRecentGeneratedImage(messages: Message[]): boolean {
+  const recent = messages.slice(-IMAGE_LOOKBACK_MESSAGES);
+  for (const m of recent) {
+    if (m.role !== 'assistant') continue;
+    if (isGeneratedImageMessage(m)) return true;
+  }
+  return false;
+}
+
 export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: ChatInterfaceProps) {
 	const currentUserId = authStore.userID();
   const { t, i18n } = useTranslation();
   const [messages, setMessages] = React.useState<Message[]>([]);
   const [input, setInput] = React.useState('');
+  const [liveTranscript, setLiveTranscript] = React.useState('');
   const inputRef = React.useRef('');
   const voiceSendRef = React.useRef<(text: string) => void>(() => {});
   const voice = useVoiceConversation({
@@ -309,9 +526,35 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
     onTranscript: text => {
       inputRef.current = text;
       setInput(text);
+      setLiveTranscript(text);
     },
-    onFinalTranscript: text => voiceSendRef.current(text),
+    onFinalTranscript: text => {
+      setLiveTranscript(text);
+      voiceSendRef.current(text);
+    },
   });
+  const customAvatars = useCustomAvatars();
+  const avatarUploadRef = React.useRef<HTMLInputElement | null>(null);
+  const avatarSource = React.useMemo(
+    () => resolveAvatarSource(voice.avatarId, customAvatars.avatars),
+    [voice.avatarId, customAvatars.avatars],
+  );
+  const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    const created = await customAvatars.addAvatar(file);
+    if (created) {
+      voice.setAvatarId(created.id);
+    } else if (customAvatars.error) {
+      const messages: Record<string, string> = {
+        unsupportedType: t('voiceCall.uploadUnsupported'),
+        tooLarge: t('voiceCall.uploadTooLarge'),
+        storageFailed: t('voiceCall.uploadFailed'),
+      };
+      toast.error(messages[customAvatars.error] || t('voiceCall.uploadFailed'));
+    }
+  };
   const [files, setFiles] = React.useState<FileInfo[]>([]);
   const filesRef = React.useRef<FileInfo[]>([]); // 用于跟踪当前文件，异步更新
   const pendingFilesRef = React.useRef<File[]>([]); // 保存待上传的原始 File 对象
@@ -350,7 +593,11 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
           if (current && sortedAgents.some(agent => (agent.ulid || agent.id) === (current.ulid || current.id))) {
             return current;
           }
-          return sortedAgents[0] || null;
+          const lastAgentId = readLastAgentId(currentUserId);
+          const lastAgent = lastAgentId
+            ? sortedAgents.find(agent => (agent.ulid || agent.id) === lastAgentId)
+            : undefined;
+          return lastAgent || sortedAgents[0] || null;
         });
       } catch (err) {
         console.error('Failed to load agents:', err);
@@ -394,6 +641,12 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
     }
   }, [preselectedAgent, onAgentUsed]);
 
+  // Remember the last agent the user used, per user
+  React.useEffect(() => {
+    const id = activeAgent?.ulid || activeAgent?.id;
+    if (id) writeLastAgentId(currentUserId, id);
+  }, [activeAgent, currentUserId]);
+
   // Load session messages
   const loadSessionMessages = async (sessionId: string) => {
     try {
@@ -423,6 +676,7 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
           files,
           timestamp: new Date(m.created_at),
           status: m.status as 'pending_approval' | 'completed' | 'failed' | undefined,
+          metadata: m.metadata || undefined,
           thinking: m.trace ? JSON.parse(m.trace)?.thinking : undefined,
           trace: m.trace ? JSON.parse(m.trace)?.trace : undefined
         };
@@ -614,12 +868,19 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
 
       // 调用 runner API
       console.log('[handleSend] Calling runner with filesToSend:', filesToSend);
+      // 组装最近会话历史（不含本轮输入，本轮走 prompt 字段），让聊天模型跨轮次
+      // 知道上下文——包括之前是否已用图像模型生成过图片。
+      const runHistory = buildRunHistory(messages);
+      if (hasRecentGeneratedImage(messages)) {
+        runHistory.unshift({ role: 'system', content: t('multimodal.imageContinuityHint') });
+      }
       const runResponse = await chatApi.runAgentStream({
         agent_id: activeAgent.ulid || activeAgent.id,
 		user_id: currentUserId,
         session_id: sessionId || undefined,
         input: messageText,
         files: filesToSend.length > 0 ? filesToSend : undefined,
+        history: runHistory.length > 0 ? runHistory : undefined,
         is_test: false,
         signal: abortControllerRef.current.signal
       });
@@ -638,6 +899,8 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
         const assistantMsgId = (Date.now() + 1).toString();
         let accumulatedContent = '';
         let finalAssistantContent = '';
+        let internalControlTagStripped = false;
+        let invalidImagePlanningOutput = false;
         let streamTokenUsage: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } = {};
         let toolCalls: Message['toolCalls'] = [];
         let pendingToolCall: { name: string; args: any } | null = null;
@@ -759,7 +1022,10 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
                       completion_tokens: data.completion_tokens,
                       total_tokens: data.total_tokens
                     };
-                    const finalContent = data.content || accumulatedContent;
+                    const rawFinalContent = data.content || accumulatedContent;
+                    internalControlTagStripped ||= hasInternalControlTag(rawFinalContent);
+                    invalidImagePlanningOutput ||= hasImagePlanningMarkup(rawFinalContent);
+                    const finalContent = stripImagePlanningMarkup(stripInternalControlTags(rawFinalContent));
                     finalAssistantContent = finalContent;
                     const { html, markdown, reportUrl, pptUrl } = extractHtmlFromMarkdown(finalContent);
                     updateMessage({
@@ -858,7 +1124,10 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
                       completion_tokens: data.completion_tokens,
                       total_tokens: data.total_tokens
                     };
-                    const finalContent = data.content || accumulatedContent;
+                    const rawFinalContent = data.content || accumulatedContent;
+                    internalControlTagStripped ||= hasInternalControlTag(rawFinalContent);
+                    invalidImagePlanningOutput ||= hasImagePlanningMarkup(rawFinalContent);
+                    const finalContent = stripImagePlanningMarkup(stripInternalControlTags(rawFinalContent));
                     finalAssistantContent = finalContent;
                     const { html, markdown, reportUrl, pptUrl } = extractHtmlFromMarkdown(finalContent);
                     updateMessage({
@@ -894,7 +1163,20 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
         }
 
         // 保存消息到数据库
-        const completedContent = finalAssistantContent || accumulatedContent;
+        const rawCompletedContent = finalAssistantContent || accumulatedContent;
+        internalControlTagStripped ||= hasInternalControlTag(rawCompletedContent);
+        invalidImagePlanningOutput ||= hasImagePlanningMarkup(rawCompletedContent);
+        const completedContent = stripImagePlanningMarkup(stripInternalControlTags(rawCompletedContent));
+        // 记录本轮生成的图片（prompt 取本轮用户输入，url 取内容中的图片地址），
+        // 便于刷新/切会话后仍能识别"上次画过图"。
+        const generatedImageUrls = extractImageUrls(completedContent);
+        const assistantMetadata = buildAssistantMetadata(
+          generatedImageUrls,
+          messageText,
+          internalControlTagStripped,
+          invalidImagePlanningOutput,
+        );
+        updateMessage({ content: completedContent, metadata: assistantMetadata });
         try {
           await chatApi.createMessage({
             session_id: sessionId,
@@ -904,7 +1186,8 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
             input_tokens: streamTokenUsage.prompt_tokens || 0,
             output_tokens: streamTokenUsage.completion_tokens || 0,
             total_tokens: streamTokenUsage.total_tokens || 0,
-            status: 'completed'
+            status: 'completed',
+            metadata: assistantMetadata
           });
         } catch (err) {
           console.error('Failed to save assistant message:', err);
@@ -939,8 +1222,18 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
         }
       }
 
-      const assistantMessageRaw = data.content || data.output || "I'm sorry, I couldn't generate a response.";
+      const rawAssistantMessage = data.content || data.output || "I'm sorry, I couldn't generate a response.";
+      const nonStreamInternalTagStripped = hasInternalControlTag(rawAssistantMessage);
+      const nonStreamInvalidImagePlanningOutput = hasImagePlanningMarkup(rawAssistantMessage);
+      const assistantMessageRaw = stripImagePlanningMarkup(stripInternalControlTags(rawAssistantMessage));
       const { html, markdown, reportUrl, pptUrl } = extractHtmlFromMarkdown(assistantMessageRaw);
+      const nonStreamImageUrls = extractImageUrls(assistantMessageRaw);
+      const nonStreamMetadata = buildAssistantMetadata(
+        nonStreamImageUrls,
+        messageText,
+        nonStreamInternalTagStripped,
+        nonStreamInvalidImagePlanningOutput,
+      );
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
@@ -951,7 +1244,8 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
         timestamp: new Date(),
         thinking: data.thinking,
         trace: data.trace,
-        status: data.status
+        status: data.status,
+        metadata: nonStreamMetadata
       };
       setMessages(prev => [...prev, assistantMessage]);
 
@@ -960,12 +1254,13 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
         await chatApi.createMessage({
           session_id: sessionId,
           role: 'assistant',
-          content: data.content || data.output || '',
+          content: assistantMessageRaw,
           model: data.metadata?.model || activeAgent.model || '',
           total_tokens: data.metadata?.tokens_used || 0,
           latency_ms: data.metadata?.latency_ms || 0,
           status: data.pending_approvals?.length > 0 ? 'pending_approval' : 'completed',
-          trace: data.trace ? JSON.stringify({ thinking: data.thinking, trace: data.trace }) : undefined
+          trace: data.trace ? JSON.stringify({ thinking: data.thinking, trace: data.trace }) : undefined,
+          metadata: nonStreamMetadata
         });
       } catch (err) {
         console.error('Failed to save assistant message:', err);
@@ -1434,7 +1729,7 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
                 )}>
                   {msg.role === 'assistant' ? (
                     msg.status === 'streaming' ? (
-                      <div className="text-slate-800 whitespace-pre-wrap">{msg.content || t('chat.solving')}</div>
+                      <div className="text-slate-800 whitespace-pre-wrap">{stripImagePlanningMarkup(stripInternalControlTags(msg.content)) || t('chat.solving')}</div>
                     ) : (
                       <MessageContent
                         content={msg.content}
@@ -1634,6 +1929,42 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
 
         {/* Input Area */}
         <div className="p-4 lg:p-6 bg-white border-t border-slate-100">
+          <input
+            ref={avatarUploadRef}
+            type="file"
+            accept="image/*,video/*"
+            className="hidden"
+            onChange={handleAvatarUpload}
+          />
+          {voice.avatarEnabled && (voice.conversationMode || voice.isListening || voice.isSpeaking) && (
+            <VoiceCallStage
+              source={avatarSource}
+              selectedId={voice.avatarId}
+              presets={AVATAR_PRESETS}
+              customAvatars={customAvatars.avatars}
+              onSelectAvatar={voice.setAvatarId}
+              isListening={voice.isListening}
+              isSpeaking={voice.isSpeaking}
+              isThinking={isLoading}
+              liveTranscript={liveTranscript}
+              speakingText={voice.speakingText}
+              voiceError={voice.voiceError}
+              agentName={activeAgent?.name}
+              onToggleMic={() => (voice.isListening ? voice.stopListening() : voice.startListening())}
+              onStopSpeaking={voice.stopSpeaking}
+              onEndCall={() => {
+                voice.setConversationMode(false);
+                voice.stopListening();
+                voice.stopSpeaking();
+              }}
+              onOpenSettings={() => setIsVoiceSettingsOpen(true)}
+              onUploadAvatar={() => avatarUploadRef.current?.click()}
+              onRemoveAvatar={(id) => {
+                void customAvatars.removeAvatar(id);
+                if (voice.avatarId === id) voice.setAvatarId(AVATAR_PRESETS[0].id);
+              }}
+            />
+          )}
           {(voice.isListening || voice.isSpeaking || voice.voiceError) && (
             <div className={cn(
               "max-w-4xl mx-auto mb-3 px-4 py-2 rounded-xl text-xs font-medium flex items-center gap-2",
@@ -1695,6 +2026,69 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
                     </div>
 
                     <div className="space-y-4">
+                      <div className="space-y-1.5">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{t('voiceCall.avatarLabel')}</span>
+                        <div className="grid grid-cols-4 gap-2">
+                          {AVATAR_PRESETS.map(preset => (
+                            <button
+                              key={preset.id}
+                              type="button"
+                              onClick={() => voice.setAvatarId(preset.id)}
+                              title={t(`voiceCall.avatars.${preset.id}`)}
+                              className={cn(
+                                "flex flex-col items-center gap-1 rounded-xl border p-1.5 transition-colors",
+                                voice.avatarId === preset.id ? "border-indigo-400 bg-indigo-50" : "border-slate-200 hover:bg-slate-50"
+                              )}
+                            >
+                              <span
+                                className="h-9 w-9 rounded-full border border-white shadow-inner"
+                                style={{ background: `radial-gradient(circle at 50% 34%, ${preset.skin} 0 42%, ${preset.hair} 43% 62%, ${preset.cloth} 63%)` }}
+                              />
+                              <span className="text-[9px] font-semibold text-slate-500 truncate w-full text-center">{t(`voiceCall.avatars.${preset.id}`)}</span>
+                            </button>
+                          ))}
+                        </div>
+
+                        {customAvatars.avatars.length > 0 && (
+                          <div className="grid grid-cols-4 gap-2 pt-1">
+                            {customAvatars.avatars.map(item => (
+                              <div
+                                key={item.id}
+                                className={cn(
+                                  "group relative flex flex-col items-center gap-1 rounded-xl border p-1.5 transition-colors cursor-pointer",
+                                  voice.avatarId === item.id ? "border-indigo-400 bg-indigo-50" : "border-slate-200 hover:bg-slate-50"
+                                )}
+                                onClick={() => voice.setAvatarId(item.id)}
+                              >
+                                <span className="h-9 w-9 rounded-full border border-white shadow-inner overflow-hidden">
+                                  {item.kind === 'video'
+                                    ? <video src={item.url} muted playsInline className="h-full w-full object-cover" />
+                                    : <img src={item.url} alt={item.name} className="h-full w-full object-cover" />}
+                                </span>
+                                <span className="text-[9px] font-semibold text-slate-500 truncate w-full text-center">{item.name}</span>
+                                <button
+                                  type="button"
+                                  onClick={event => { event.stopPropagation(); void customAvatars.removeAvatar(item.id); if (voice.avatarId === item.id) voice.setAvatarId(AVATAR_PRESETS[0].id); }}
+                                  title={t('common.confirmDelete')}
+                                  className="absolute -top-1.5 -right-1.5 hidden group-hover:flex h-5 w-5 items-center justify-center rounded-full bg-white text-slate-400 shadow hover:text-red-500"
+                                >
+                                  <Trash2 size={11} />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => avatarUploadRef.current?.click()}
+                          className="mt-1 flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-slate-300 py-2 text-[11px] font-semibold text-slate-500 hover:border-indigo-300 hover:text-indigo-600 transition-colors"
+                        >
+                          <ImageIcon size={13} />
+                          {t('voiceCall.uploadReal')}
+                        </button>
+                      </div>
+
                       <label className="block space-y-1.5">
                         <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">音色</span>
                         <select
@@ -1892,6 +2286,22 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
                   >
                     <Podcast size={12} />
                     <span className="hidden sm:inline">连续语音</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => voice.setAvatarEnabled(!voice.avatarEnabled)}
+                    disabled={!voice.synthesisSupported}
+                    title={voice.avatarEnabled ? t('voiceCall.avatarOff') : t('voiceCall.avatarOn')}
+                    className={cn(
+                      "flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold whitespace-nowrap transition-colors",
+                      voice.avatarEnabled
+                        ? "bg-indigo-50 text-indigo-600 ring-1 ring-indigo-200"
+                        : "text-slate-500 hover:bg-slate-50 disabled:text-slate-300 disabled:cursor-not-allowed"
+                    )}
+                  >
+                    <UserRound size={12} />
+                    <span className="hidden sm:inline">{t('voiceCall.simulatePerson')}</span>
                   </button>
                 </div>
 

@@ -12,6 +12,7 @@ import { KnowledgeBaseManager } from './components/KnowledgeBaseManager';
 import { SkillManager } from './components/SkillManager';
 import { AgentOrchestrator } from './components/AgentOrchestrator';
 import { ModelManager } from './components/ModelManager';
+import { MediaStudio } from './components/MediaStudio';
 import { Settings } from './components/Settings';
 import { Inbox } from './components/Inbox';
 import { CommandCenter } from './components/CommandCenter';
@@ -108,6 +109,8 @@ export default function App() {
         }} />
       case 'models':
         return <ModelManager />;
+      case 'media':
+        return <MediaStudio />;
       case 'settings':
         return <Settings />;
       case 'inbox':

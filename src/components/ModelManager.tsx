@@ -20,7 +20,8 @@ import {
   Laptop,
   PackageCheck,
   Power,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Video
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useTranslation } from 'react-i18next';
@@ -63,9 +64,9 @@ export function ModelManager() {
 	const currentUserId = authStore.userID();
 	const isAdmin = (authStore.user()?.admin_level || 0) > 0;
   const [showAllUsers, setShowAllUsers] = React.useState(false);
-  const [activeTab, setActiveTab] = React.useState<'llm' | 'embedding' | 'image'>('llm');
+  const [activeTab, setActiveTab] = React.useState<'llm' | 'embedding' | 'image' | 'video'>('llm');
   const [isModalOpen, setIsModalOpen] = React.useState(false);
-  const [newModelType, setNewModelType] = React.useState<'llm' | 'embedding' | 'image'>('llm');
+  const [newModelType, setNewModelType] = React.useState<'llm' | 'embedding' | 'image' | 'video'>('llm');
   const [editingModelId, setEditingModelId] = React.useState<string | null>(null);
   const [isTrainingOpen, setIsTrainingOpen] = React.useState(false);
   const [loading, setLoading] = React.useState(true);
@@ -99,7 +100,8 @@ export function ModelManager() {
         latency: m.latency || 'N/A',
         contextWindow: m.contextWindow || 'N/A',
         usage: m.usage || 0,
-        type: m.modelType as 'llm' | 'embedding' | 'image',
+        type: m.modelType as 'llm' | 'embedding' | 'image' | 'video',
+		capabilities: m.capabilities || '',
 		category: m.category as 'default' | 'rewrite' | 'skill' | 'summarize' | undefined,
 		keyId: m.keyId,
 		keyName: m.keyName,
@@ -140,6 +142,7 @@ export function ModelManager() {
 	keyId: '',
     category: 'default' as 'default' | 'rewrite' | 'skill' | 'summarize',
     contextWindow: '',
+	capabilities: '',
   });
 	const [keyForm, setKeyForm] = React.useState({ name: '', provider: 'OpenAI', apiKey: '', baseUrl: '' });
 
@@ -148,8 +151,8 @@ export function ModelManager() {
     [catalog, newModelType]
   );
   const selectedCatalog = catalog.find(item => item.ulid === selectedCatalogId);
-	const addModelLabel = (type: 'llm' | 'embedding' | 'image') => t(type === 'llm' ? 'models.addModel' : type === 'embedding' ? 'models.addEmbedding' : 'models.addImage');
-	const editModelLabel = (type: 'llm' | 'embedding' | 'image') => t(type === 'llm' ? 'models.editModel' : type === 'embedding' ? 'models.editEmbedding' : 'models.editImage');
+	const addModelLabel = (type: 'llm' | 'embedding' | 'image' | 'video') => t(type === 'llm' ? 'models.addModel' : type === 'embedding' ? 'models.addEmbedding' : type === 'image' ? 'models.addImage' : 'models.addVideo');
+	const editModelLabel = (type: 'llm' | 'embedding' | 'image' | 'video') => t(type === 'llm' ? 'models.editModel' : type === 'embedding' ? 'models.editEmbedding' : type === 'image' ? 'models.editImage' : 'models.editVideo');
 
 	React.useEffect(() => {
 		let cancelled = false;
@@ -205,6 +208,7 @@ export function ModelManager() {
       provider: preset.provider,
       baseUrl: preset.defaultBaseUrl,
 	  contextWindow: preset.contextWindow,
+	  capabilities: preset.capabilities,
 	  keyId: keys.find(key => key.enabled && key.provider.toLowerCase() === preset.provider.toLowerCase())?.ulid || '',
 	}));
   };
@@ -241,6 +245,7 @@ export function ModelManager() {
           modelType: newModelType,
           category: newModelType === 'llm' ? formData.category : undefined,
           contextWindow: formData.contextWindow,
+		  capabilities: formData.capabilities,
         });
       } else {
         await modelApi.create({
@@ -251,6 +256,7 @@ export function ModelManager() {
           modelType: newModelType,
           category: newModelType === 'llm' ? formData.category : '',
           contextWindow: formData.contextWindow,
+		  capabilities: formData.capabilities,
         });
       }
       await loadModels();
@@ -262,7 +268,7 @@ export function ModelManager() {
     setIsModalOpen(false);
     setEditingModelId(null);
     setSelectedCatalogId('');
-	setFormData({ name: '', provider: 'OpenAI', baseUrl: 'https://api.openai.com/v1', keyId: '', category: 'default', contextWindow: '' });
+	setFormData({ name: '', provider: 'OpenAI', baseUrl: 'https://api.openai.com/v1', keyId: '', category: 'default', contextWindow: '', capabilities: '' });
   };
 
   const handleEditClick = (model: Model) => {
@@ -275,6 +281,7 @@ export function ModelManager() {
 	  keyId: model.keyId || '',
       category: model.category || 'default',
       contextWindow: model.contextWindow || '',
+	  capabilities: model.capabilities || '',
     });
     setSelectedCatalogId('');
     setIsModalOpen(true);
@@ -394,7 +401,7 @@ export function ModelManager() {
               setEditingModelId(null);
               setNewModelType(activeTab);
               setSelectedCatalogId('');
-			  setFormData({ name: '', provider: 'OpenAI', baseUrl: 'https://api.openai.com/v1', keyId: '', category: 'default', contextWindow: '' });
+			  setFormData({ name: '', provider: 'OpenAI', baseUrl: 'https://api.openai.com/v1', keyId: '', category: 'default', contextWindow: '', capabilities: '' });
               setIsModalOpen(true);
             }}
             className="flex items-center gap-2 bg-brand-500 hover:bg-brand-600 text-white px-4 py-2 rounded-lg font-medium transition-all shadow-sm"
@@ -433,6 +440,15 @@ export function ModelManager() {
         >
           {t('models.imageTab')}
         </button>
+        <button
+          onClick={() => setActiveTab('video')}
+          className={cn(
+            "px-6 py-2 rounded-lg text-sm font-bold transition-all",
+            activeTab === 'video' ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
+          )}
+        >
+          {t('models.videoTab')}
+        </button>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -459,7 +475,7 @@ export function ModelManager() {
                     "w-12 h-12 rounded-xl flex items-center justify-center transition-colors",
                     model.type === 'llm' ? "bg-slate-100 text-slate-600 group-hover:bg-brand-50 group-hover:text-brand-500" : model.type === 'embedding' ? "bg-blue-50 text-blue-500 group-hover:bg-blue-100" : "bg-amber-50 text-amber-600 group-hover:bg-amber-100"
                   )}>
-                    {model.type === 'llm' ? <Cpu size={24} /> : model.type === 'embedding' ? <Database size={24} /> : <ImageIcon size={24} />}
+                    {model.type === 'llm' ? <Cpu size={24} /> : model.type === 'embedding' ? <Database size={24} /> : model.type === 'video' ? <Video size={24} /> : <ImageIcon size={24} />}
                   </div>
                   <div>
                     <div className="flex items-center gap-2">
@@ -563,7 +579,7 @@ export function ModelManager() {
                   setEditingModelId(null);
                   setNewModelType(activeTab);
                   setSelectedCatalogId('');
-				  setFormData({ name: '', provider: 'OpenAI', baseUrl: 'https://api.openai.com/v1', keyId: '', category: 'default', contextWindow: '' });
+				  setFormData({ name: '', provider: 'OpenAI', baseUrl: 'https://api.openai.com/v1', keyId: '', category: 'default', contextWindow: '', capabilities: '' });
                   setIsModalOpen(true);
                 }}
                 className="inline-flex items-center gap-2 text-brand-500 font-bold hover:text-brand-600"
@@ -685,6 +701,20 @@ export function ModelManager() {
                         <ImageIcon size={16} />
                         {t('models.image')}
                       </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNewModelType('video');
+                          setSelectedCatalogId('');
+                        }}
+                        className={cn(
+                          "flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-bold transition-all",
+                          newModelType === 'video' ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                        )}
+                      >
+                        <Video size={16} />
+                        {t('models.video')}
+                      </button>
                     </div>
                   </div>
 
@@ -713,6 +743,9 @@ export function ModelManager() {
 							{t('models.freeLocalModel')}
 						  </div>
 						  <p className="mt-1 text-xs text-emerald-800/75">{t('models.localModelDescription', { family: selectedCatalog.modelFamily })}</p>
+						  {selectedCatalog.capabilities?.split(',').some(capability => capability.trim().toLowerCase() === 'non-commercial') && (
+							<p className="mt-2 rounded-lg bg-amber-100 px-2.5 py-2 text-[11px] font-semibold text-amber-800">{t('models.nonCommercialNotice')}</p>
+						  )}
 						</div>
 						<span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-[10px] font-bold text-emerald-700">{selectedCatalog.runtime}</span>
 					  </div>
@@ -853,6 +886,19 @@ export function ModelManager() {
                       className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none transition-all"
                     />
                   </div>
+
+                  {(newModelType === 'image' || newModelType === 'video') && (
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-slate-400 uppercase">{t('models.capabilities')}</label>
+                      <input
+                        type="text"
+                        value={formData.capabilities}
+                        onChange={e => setFormData({ ...formData, capabilities: e.target.value })}
+                        placeholder={newModelType === 'video' ? 'text-to-video,image-to-video,async' : 'text-to-image,image-to-image'}
+                        className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none transition-all"
+                      />
+                    </div>
+                  )}
 
 				  <div className="space-y-1">
 					<div className="flex items-center justify-between">

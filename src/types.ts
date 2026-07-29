@@ -1,6 +1,6 @@
 import type { ModelRuntimeMode } from './lib/runtimeConstants';
 
-export type View = 'dashboard' | 'orchestrator' | 'agents' | 'skills' | 'knowledge' | 'models' | 'chat' | 'workspace' | 'settings' | 'inbox';
+export type View = 'dashboard' | 'orchestrator' | 'agents' | 'skills' | 'knowledge' | 'models' | 'media' | 'chat' | 'workspace' | 'settings' | 'inbox';
 
 export interface Agent {
   ulid?: string;
@@ -10,6 +10,7 @@ export interface Agent {
   model: string;
   embedding_model?: string;
   image_model?: string;
+  video_model?: string;
   icon: string;
   config?: any;
   config_json?: any;
@@ -155,6 +156,7 @@ export interface Message {
   pptUrl?: string;      // PPT文件的URL（如 /uploads/{sessionID}/reports/xxx.pptx）
   status?: 'pending_approval' | 'completed' | 'failed' | 'streaming';
   interruptId?: string;  // 用于审批时调用 resume
+  metadata?: string;     // 原始 metadata JSON（如 files、imageActions 等）
 }
 
 export interface TraceStep {
@@ -199,7 +201,8 @@ export interface Model {
   latency?: string;
   contextWindow?: string;
   usage?: number;
-  type: 'llm' | 'embedding' | 'image';
+  type: 'llm' | 'embedding' | 'image' | 'video';
+  capabilities?: string;
   category?: 'default' | 'rewrite' | 'skill' | 'summarize';
 	keyId?: string;
 	keyName?: string;
