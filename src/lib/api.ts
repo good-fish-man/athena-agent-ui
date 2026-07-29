@@ -103,6 +103,70 @@ export const authApi = {
   },
 };
 
+export interface VoiceAvatarDTO {
+  id: string;
+  name: string;
+  kind: 'image' | 'video';
+  url: string;
+}
+
+export const voiceAvatarApi = {
+  async list(): Promise<VoiceAvatarDTO[]> {
+    const res = await readJson<VoiceAvatarDTO[]>(await apiFetch(`${API_BASE}/auth/me/voice-avatars`));
+    return (res || []).map(item => ({ ...item, url: resolveRuntimeAssetUrl(item.url) }));
+  },
+  async upload(file: File): Promise<VoiceAvatarDTO> {
+    const form = new FormData();
+    form.append('avatar', file);
+    const item = await readJson<VoiceAvatarDTO>(await apiFetch(`${API_BASE}/auth/me/voice-avatars`, { method: 'POST', body: form }));
+    return { ...item, url: resolveRuntimeAssetUrl(item.url) };
+  },
+  async remove(id: string): Promise<void> {
+    await readJson(await apiFetch(`${API_BASE}/auth/me/voice-avatars/${encodeURIComponent(id)}`, { method: 'DELETE' }));
+  },
+};
+
+export type PromptAssistantMessage = { role: 'system' | 'user' | 'assistant'; content: string };
+
+export interface PromptAssistantStreamParams {
+  modelId: string;
+  messages: PromptAssistantMessage[];
+  prompt: string;
+  userId: string;
+  sessionId: string;
+  signal?: AbortSignal;
+}
+
+export const promptAssistantApi = {
+  // Streams an ad-hoc completion from one of the user's existing models WITHOUT a
+  // saved agent, by sending an inline model + messages to the runtime.
+  async stream(params: PromptAssistantStreamParams): Promise<Response> {
+    const body = {
+      prompt: params.prompt,
+      request_id: makeId(),
+      messages: params.messages,
+      models: { default: { extra_fields: { model_id: params.modelId } } },
+      context: {
+        user_id: params.userId,
+        session_id: params.sessionId,
+        is_test: true,
+      },
+      options: { stream: true },
+    };
+    const res = await apiFetch(`${RUNTIME_API_BASE}/run/stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: params.signal,
+    });
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      throw new Error(json.message || `Failed to run prompt assistant: ${res.status}`);
+    }
+    return res;
+  },
+};
+
 export interface AgentMemory {
   ulid: string;
   agent_id: string;
@@ -156,7 +220,7 @@ export interface Model {
   name: string;
   provider: string;
   baseUrl: string;
-  modelType: 'llm' | 'embedding' | 'image';
+  modelType: 'llm' | 'embedding' | 'image' | 'video';
   category: string;
   status: string;
   latency: string;
@@ -166,6 +230,7 @@ export interface Model {
 	runtimeMode: ModelRuntimeMode;
 	keyId?: string;
 	keyName?: string;
+	capabilities?: string;
 }
 
 export interface ModelKey {
@@ -186,7 +251,7 @@ export interface ModelCatalog {
   created_at: number;
   updated_at: number;
   provider: string;
-  modelType: 'llm' | 'embedding' | 'image';
+  modelType: 'llm' | 'embedding' | 'image' | 'video';
   modelFamily: string;
   modelVersion: string;
   displayName: string;
@@ -220,6 +285,81 @@ export interface LocalModelEnvironment {
   compatible: boolean;
   message: string;
 }
+
+export interface MediaGenerationRequest {
+  modelId: string;
+  mediaType: 'image' | 'video';
+  operation?: 'generate';
+  prompt: string;
+  negativePrompt?: string;
+  sourceUrl?: string;
+  size?: string;
+  quality?: string;
+  durationSeconds?: number;
+}
+
+export interface MediaGenerationResult {
+  mediaUrl: string;
+  mediaType: 'image' | 'video';
+  mimeType: string;
+  providerJobId?: string;
+  traceId?: string;
+}
+
+export interface MediaGenerationJob {
+  ulid: string;
+  createdAt: number;
+  updatedAt: number;
+  modelId: string;
+  modelName: string;
+  mediaType: 'image' | 'video';
+  prompt: string;
+  negativePrompt?: string;
+  sourceUrl?: string;
+  size?: string;
+  quality?: string;
+  durationSeconds?: number;
+  status: 'queued' | 'running' | 'completed' | 'failed';
+  progress: number;
+  mediaUrl?: string;
+  mimeType?: string;
+  providerJobId?: string;
+  errorMessage?: string;
+  traceId?: string;
+  startedAt?: number;
+  finishedAt?: number;
+}
+
+export const mediaApi = {
+  async generate(data: MediaGenerationRequest): Promise<MediaGenerationResult> {
+    return readJson<MediaGenerationResult>(await apiFetch(`${RUNTIME_API_BASE}/media/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    }));
+  },
+
+  async createJob(data: MediaGenerationRequest): Promise<MediaGenerationJob> {
+    return readJson<MediaGenerationJob>(await apiFetch(`${RUNTIME_API_BASE}/media/jobs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    }));
+  },
+
+  async jobs(mediaType?: 'image' | 'video'): Promise<MediaGenerationJob[]> {
+    const query = mediaType ? `?mediaType=${mediaType}&limit=100` : '?limit=100';
+    return readJson<MediaGenerationJob[]>(await apiFetch(`${RUNTIME_API_BASE}/media/jobs${query}`));
+  },
+
+  async job(id: string): Promise<MediaGenerationJob> {
+    return readJson<MediaGenerationJob>(await apiFetch(`${RUNTIME_API_BASE}/media/jobs/${encodeURIComponent(id)}`));
+  },
+
+  async deleteJob(id: string): Promise<void> {
+    await readJson(await apiFetch(`${RUNTIME_API_BASE}/media/jobs/${encodeURIComponent(id)}`, { method: 'DELETE' }));
+  },
+};
 
 export interface LocalModelInstallJob {
   jobId: string;
@@ -382,9 +522,10 @@ export const modelApi = {
     provider: string;
     baseUrl: string;
 	keyId: string;
-    modelType: 'llm' | 'embedding' | 'image';
+    modelType: 'llm' | 'embedding' | 'image' | 'video';
     category: string;
     contextWindow?: string;
+	capabilities?: string;
   }): Promise<{ ulid: string }> {
     const res = await apiFetch(`${API_BASE}/model`, {
       method: 'POST',
@@ -403,11 +544,12 @@ export const modelApi = {
     provider?: string;
     baseUrl?: string;
 	keyId?: string;
-    modelType?: 'llm' | 'embedding' | 'image';
+    modelType?: 'llm' | 'embedding' | 'image' | 'video';
     category?: string;
     status?: string;
     latency?: string;
     contextWindow?: string;
+	capabilities?: string;
   }): Promise<void> {
     const res = await apiFetch(`${API_BASE}/model/${ulid}`, {
       method: 'PUT',
@@ -440,7 +582,7 @@ export const modelApi = {
     return json.data || json;
   },
 
-  async findAll(modelType?: 'llm' | 'embedding' | 'image', includeDisabled = false): Promise<Model[]> {
+  async findAll(modelType?: 'llm' | 'embedding' | 'image' | 'video', includeDisabled = false): Promise<Model[]> {
     const res = await apiFetch(`${API_BASE}/model/all`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -475,7 +617,7 @@ export const modelApi = {
 		}));
 	},
 
-  async findCatalog(params?: { modelType?: 'llm' | 'embedding' | 'image'; provider?: string }): Promise<ModelCatalog[]> {
+  async findCatalog(params?: { modelType?: 'llm' | 'embedding' | 'image' | 'video'; provider?: string }): Promise<ModelCatalog[]> {
     const search = new URLSearchParams();
     if (params?.modelType) search.set('modelType', params.modelType);
     if (params?.provider) search.set('provider', params.provider);
@@ -1040,6 +1182,7 @@ export const agentApi = {
     model: string;
     embedding_model?: string;
     image_model?: string;
+    video_model?: string;
     config: string;
     config_json?: string;
     enabled: boolean;
@@ -1136,12 +1279,15 @@ export interface ChatApproval {
   updated_at: number;
 }
 
+export type RunHistoryMessage = { role: 'user' | 'assistant' | 'system'; content: string };
+
 type RunAgentParams = {
   agent_id: string;
   user_id: string;
   session_id?: string;
   input: string;
   files?: any[];
+  history?: RunHistoryMessage[];
   is_test?: boolean;
   signal?: AbortSignal;
 };
@@ -1181,6 +1327,9 @@ function normalizeRuntimeConfig(data: RunAgentParams) {
     prompt: data.input,
     request_id: makeId(),
     context,
+    messages: (data.history || [])
+      .filter(m => m && typeof m.content === 'string' && m.content.trim() !== '')
+      .map(m => ({ role: m.role, content: m.content })),
     files: (data.files || []).map(file => ({
       name: file.name,
       size: file.size || 0,

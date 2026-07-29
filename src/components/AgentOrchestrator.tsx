@@ -38,6 +38,7 @@ import { toast } from 'sonner';
 import { modelApi, skillApi, knowledgeBaseApi, agentApi, channelApi, chatApi } from '../lib/api';
 import { authStore } from '../lib/auth';
 import { Agent, Message, Variable } from '../types';
+import PromptAssistant from './PromptAssistant';
 
 interface AgentOrchestratorProps {
   editingAgent?: Agent | null;
@@ -64,6 +65,7 @@ export function AgentOrchestrator({ editingAgent, onSaved }: AgentOrchestratorPr
 
   // Backend Data State
   const [backendModels, setBackendModels] = React.useState<any[]>([]);
+  const [promptAssistantOpen, setPromptAssistantOpen] = React.useState(false);
   const [backendKBs, setBackendKBs] = React.useState<any[]>([]);
   const [backendSkills, setBackendSkills] = React.useState<any[]>([]);
   const [backendChannels, setBackendChannels] = React.useState<any[]>([]);
@@ -114,6 +116,7 @@ export function AgentOrchestrator({ editingAgent, onSaved }: AgentOrchestratorPr
     },
     embeddingModel: '',
     imageModel: '',
+    videoModel: '',
     temperature: 0.7,
     maxTokens: 2048,
     topK: 3,
@@ -166,6 +169,9 @@ export function AgentOrchestrator({ editingAgent, onSaved }: AgentOrchestratorPr
       const defaultImageModel = backendModels.find(model =>
         (model.modelType || model.model_type) === 'image'
       );
+      const defaultVideoModel = backendModels.find(model =>
+        (model.modelType || model.model_type) === 'video'
+      );
       if (!defaultModel) return;
       const defaultModelId = defaultModel.ulid || defaultModel.id;
       setAgentConfig(prev => ({
@@ -178,6 +184,7 @@ export function AgentOrchestrator({ editingAgent, onSaved }: AgentOrchestratorPr
         },
         embeddingModel: prev.embeddingModel || (defaultEmbeddingModel?.ulid || defaultEmbeddingModel?.id || ''),
         imageModel: prev.imageModel || (defaultImageModel?.ulid || defaultImageModel?.id || ''),
+        videoModel: prev.videoModel || (defaultVideoModel?.ulid || defaultVideoModel?.id || ''),
       }));
     }
   }, [backendModels, editingAgent]);
@@ -251,6 +258,7 @@ export function AgentOrchestrator({ editingAgent, onSaved }: AgentOrchestratorPr
         },
         embeddingModel: parsedConfig.embeddingModel || editingAgent.embedding_model || '',
         imageModel: parsedConfig.imageModel || editingAgent.image_model || '',
+        videoModel: parsedConfig.videoModel || editingAgent.video_model || '',
         temperature: parsedConfig.temperature ?? prev.temperature,
         maxTokens: parsedConfig.maxTokens ?? prev.maxTokens,
         topK: parsedConfig.topK ?? prev.topK,
@@ -363,6 +371,18 @@ export function AgentOrchestrator({ editingAgent, onSaved }: AgentOrchestratorPr
             extra_fields: { model_id: imageModel.ulid || imageModel.id },
           };
         }
+
+		const videoModel = backendModels.find(model =>
+		  (model.ulid || model.id) === agentConfig.videoModel
+		);
+		if (videoModel) {
+		  models.video = {
+			provider: videoModel.provider,
+			name: videoModel.name,
+			api_base: videoModel.baseUrl || videoModel.base_url || '',
+			extra_fields: { model_id: videoModel.ulid || videoModel.id },
+		  };
+		}
 
         // 转换 skills (工具)
         const tools = backendSkills
@@ -531,6 +551,7 @@ export function AgentOrchestrator({ editingAgent, onSaved }: AgentOrchestratorPr
         model: resolvedModels.default,
         embedding_model: agentConfig.embeddingModel,
         image_model: agentConfig.imageModel,
+        video_model: agentConfig.videoModel,
         enabled: true,
         channels: JSON.stringify(agentConfig.channels),
         is_periodic: agentConfig.isPeriodic,
@@ -541,6 +562,7 @@ export function AgentOrchestrator({ editingAgent, onSaved }: AgentOrchestratorPr
           models: resolvedModels,
           embeddingModel: agentConfig.embeddingModel,
           imageModel: agentConfig.imageModel,
+          videoModel: agentConfig.videoModel,
           temperature: agentConfig.temperature,
           maxTokens: agentConfig.maxTokens,
           topK: agentConfig.topK,
@@ -1291,7 +1313,26 @@ export function AgentOrchestrator({ editingAgent, onSaved }: AgentOrchestratorPr
                   className="w-full rounded-xl border border-amber-200 bg-white px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-amber-500/20"
                 >
                   <option value="">{t('orchestrator.noImageModel')}</option>
-                  {backendModels.filter(model => (model.modelType || model.model_type) === 'image').map(model => (
+                  {backendModels.filter(model => (model.modelType || model.model_type) === 'image' || (model.capabilities || '').split(',').some((capability: string) => ['text-to-image', 'image-output'].includes(capability.trim().toLowerCase()))).map(model => (
+                    <option key={model.ulid || model.id} value={model.ulid || model.id}>{model.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-sky-100 bg-sky-50/60 p-4">
+              <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(260px,420px)] md:items-center">
+                <div>
+                  <label className="text-xs font-bold text-sky-900">{t('orchestrator.videoModel')}</label>
+                  <p className="mt-1 text-xs text-sky-700/80">{t('orchestrator.videoModelHelp')}</p>
+                </div>
+                <select
+                  value={agentConfig.videoModel}
+                  onChange={(event) => setAgentConfig(prev => ({ ...prev, videoModel: event.target.value }))}
+                  className="w-full rounded-xl border border-sky-200 bg-white px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-sky-500/20"
+                >
+                  <option value="">{t('orchestrator.noVideoModel')}</option>
+                  {backendModels.filter(model => (model.modelType || model.model_type) === 'video' || (model.capabilities || '').split(',').some((capability: string) => ['text-to-video', 'video-output'].includes(capability.trim().toLowerCase()))).map(model => (
                     <option key={model.ulid || model.id} value={model.ulid || model.id}>{model.name}</option>
                   ))}
                 </select>
@@ -1613,9 +1654,19 @@ export function AgentOrchestrator({ editingAgent, onSaved }: AgentOrchestratorPr
 
           {/* System Prompt */}
           <section className="space-y-4">
-            <div className="flex items-center gap-2 text-slate-900">
-              <Terminal size={18} className="text-brand-500" />
-              <h2 className="font-bold">{t('orchestrator.systemPrompt')}</h2>
+            <div className="flex items-center justify-between gap-2 text-slate-900">
+              <div className="flex items-center gap-2">
+                <Terminal size={18} className="text-brand-500" />
+                <h2 className="font-bold">{t('orchestrator.systemPrompt')}</h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPromptAssistantOpen(true)}
+                className="flex items-center gap-1.5 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-bold text-indigo-600 transition-colors hover:bg-indigo-100"
+              >
+                <Sparkles size={14} />
+                {t('promptAssistant.open')}
+              </button>
             </div>
             <div className="space-y-4">
               {/* Variable Management */}
@@ -1696,6 +1747,26 @@ export function AgentOrchestrator({ editingAgent, onSaved }: AgentOrchestratorPr
               />
             </div>
           </section>
+
+          <PromptAssistant
+            open={promptAssistantOpen}
+            onClose={() => setPromptAssistantOpen(false)}
+            models={backendModels
+              .filter(m => !(m.modelType || m.model_type) || (m.modelType || m.model_type) === 'llm')
+              .map(m => ({ id: m.ulid || m.id, name: m.name }))}
+            defaultModelId={agentConfig.models.default}
+            userId={authStore.userID()}
+            currentPrompt={agentConfig.systemPrompt}
+            onApply={(prompt, mode) =>
+              setAgentConfig(prev => ({
+                ...prev,
+                systemPrompt:
+                  mode === 'append' && prev.systemPrompt.trim()
+                    ? `${prev.systemPrompt.trim()}\n\n${prompt}`
+                    : prompt,
+              }))
+            }
+          />
 
           {/* Memory Settings */}
           <section className="space-y-4">
