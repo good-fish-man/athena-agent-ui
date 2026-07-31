@@ -104,55 +104,77 @@ function extractHtmlFromMarkdown(content: string): { html: string | null; markdo
 }
 
 function ClarificationCard({ data, onAnswer }: { data: ClarificationMessage; onAnswer?: (answer: string) => void }) {
-  const [selected, setSelected] = React.useState<string[]>([]);
-  const multiSelect = Boolean(data.multi_select);
+  const { t } = useTranslation();
+  const [selected, setSelected] = React.useState<Record<number, string[]>>({});
 
-  const choose = (label: string) => {
-    if (!multiSelect) {
-      onAnswer?.(label);
-      return;
-    }
-    setSelected(current => current.includes(label) ? current.filter(item => item !== label) : [...current, label]);
+  const answerLine = (index: number, answers: string[]) => {
+    const question = data.questions[index];
+    return `${question.header || question.question}：${answers.join('、')}`;
   };
 
+  const choose = (questionIndex: number, label: string) => {
+    const question = data.questions[questionIndex];
+    if (data.questions.length === 1 && !question.multi_select) {
+      onAnswer?.(answerLine(questionIndex, [label]));
+      return;
+    }
+    setSelected(current => {
+      const values = current[questionIndex] || [];
+      return {
+        ...current,
+        [questionIndex]: question.multi_select
+          ? values.includes(label) ? values.filter(item => item !== label) : [...values, label]
+          : [label],
+      };
+    });
+  };
+
+  const complete = data.questions.every((_, index) => (selected[index] || []).length > 0);
+  const submit = () => onAnswer?.(data.questions.map((_, index) => answerLine(index, selected[index])).join('\n'));
+
   return (
-    <div className="not-prose space-y-3">
-      {data.header && <span className="inline-flex rounded-full bg-slate-100 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">{data.header}</span>}
-      <p className="text-sm font-semibold leading-6 text-slate-900">{data.question}</p>
-      <div className="grid gap-2">
-        {data.options.map(option => {
-          const active = selected.includes(option.label);
-          return (
-            <button
-              type="button"
-              key={option.label}
-              onClick={() => choose(option.label)}
-              disabled={!onAnswer}
-              className={cn(
-                "group w-full rounded-xl border px-3 py-2.5 text-left transition-all",
-                active ? "border-emerald-400 bg-emerald-50" : "border-slate-200 bg-white hover:border-slate-400 hover:bg-slate-50",
-                !onAnswer && "cursor-default opacity-70"
-              )}
-            >
-              <span className="flex items-center justify-between gap-3">
-                <span>
-                  <span className="block text-xs font-bold text-slate-800">{option.label}</span>
-                  {option.description && <span className="mt-0.5 block text-[11px] leading-4 text-slate-500">{option.description}</span>}
-                </span>
-                <ChevronRight size={14} className="shrink-0 text-slate-300 group-hover:text-slate-600" />
-              </span>
-            </button>
-          );
-        })}
-      </div>
-      {multiSelect && (
+    <div className="not-prose space-y-4">
+      {data.intro && <p className="rounded-xl bg-slate-50 px-3 py-2.5 text-xs leading-5 text-slate-600">{data.intro}</p>}
+      {data.questions.map((question, questionIndex) => (
+        <div key={`${question.header || 'question'}-${questionIndex}`} className="space-y-3">
+          {question.header && <span className="inline-flex rounded-full bg-slate-100 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">{question.header}</span>}
+          <p className="text-sm font-semibold leading-6 text-slate-900">{question.question}</p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {question.options.map(option => {
+              const active = (selected[questionIndex] || []).includes(option.label);
+              return (
+                <button
+                  type="button"
+                  key={option.label}
+                  onClick={() => choose(questionIndex, option.label)}
+                  disabled={!onAnswer}
+                  className={cn(
+                    "group w-full rounded-xl border px-3 py-2.5 text-left transition-all",
+                    active ? "border-emerald-400 bg-emerald-50" : "border-slate-200 bg-white hover:border-slate-400 hover:bg-slate-50",
+                    !onAnswer && "cursor-default opacity-70"
+                  )}
+                >
+                  <span className="flex items-center justify-between gap-3">
+                    <span>
+                      <span className="block text-xs font-bold text-slate-800">{option.label}</span>
+                      {option.description && <span className="mt-0.5 block text-[11px] leading-4 text-slate-500">{option.description}</span>}
+                    </span>
+                    {active ? <Check size={14} className="shrink-0 text-emerald-600" /> : <ChevronRight size={14} className="shrink-0 text-slate-300 group-hover:text-slate-600" />}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+      {(data.questions.length > 1 || data.questions.some(question => question.multi_select)) && (
         <button
           type="button"
-          disabled={selected.length === 0 || !onAnswer}
-          onClick={() => onAnswer?.(selected.join('、'))}
+          disabled={!complete || !onAnswer}
+          onClick={submit}
           className="w-full rounded-xl bg-slate-900 px-3 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-30"
         >
-          确认选择
+          {t('common.confirm', { defaultValue: 'Confirm choices' })}
         </button>
       )}
     </div>
