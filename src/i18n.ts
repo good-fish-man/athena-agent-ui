@@ -207,7 +207,13 @@ const resources = {
         dropSubtitle: 'Images, documents, and data files supported',
         input: 'Input',
         output: 'Output',
-        solving: 'Solving the problem...'
+        solving: 'Solving the problem...',
+        browserAuthTitle: 'Sign in to continue',
+        browserAuthReason: 'This page requires authentication before the Agent can continue.',
+        browserAuthInstructions: 'A private browser window was opened on the computer running Athena. Complete the password, CAPTCHA, verification, or QR sign-in there, then return here.',
+        browserAuthSecurity: 'Credentials, verification codes, and cookies stay in the browser and are never sent to the model.',
+        browserAuthComplete: 'I have signed in',
+        browserAuthSubmitted: 'Continuing…'
       },
       knowledge: {
         title: 'Knowledge Base',
@@ -946,7 +952,13 @@ const resources = {
         dropSubtitle: '支持图片、文档和数据文件',
         input: '输入',
         output: '输出',
-        solving: '正在解决问题中...'
+        solving: '正在解决问题中...',
+        browserAuthTitle: '登录后继续',
+        browserAuthReason: '该页面需要认证，Agent 才能继续读取内容。',
+        browserAuthInstructions: 'Athena 已在运行服务的电脑上打开独立浏览器窗口。请在窗口中完成密码、验证码、二次验证或扫码登录，然后返回这里。',
+        browserAuthSecurity: '账号密码、验证码和 Cookie 只保留在浏览器中，不会发送给大模型。',
+        browserAuthComplete: '我已完成登录',
+        browserAuthSubmitted: '正在继续…'
       },
       knowledge: {
         title: '知识库',

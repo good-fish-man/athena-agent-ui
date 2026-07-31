@@ -15,6 +15,16 @@ export type ClarificationMessage = {
   questions: ClarificationQuestion[];
 };
 
+export type BrowserAuthenticationMessage = {
+  type: 'browser_authentication';
+  status: 'authentication_required';
+  session_id: string;
+  url: string;
+  domain: string;
+  reason?: string;
+  message?: string;
+};
+
 type LegacyClarificationMessage = ClarificationQuestion & { intro?: string };
 
 function firstJSONObject(content: string) {
@@ -67,7 +77,29 @@ export function parseClarificationMessage(content: string): { data: Clarificatio
   }
 }
 
+export function parseBrowserAuthenticationMessage(content: string): { data: BrowserAuthenticationMessage; prefix: string } | null {
+  const candidate = firstJSONObject(content.replace(/^\s*```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, ''));
+  if (!candidate) return null;
+  try {
+    const data = JSON.parse(candidate.json) as Partial<BrowserAuthenticationMessage>;
+    if (
+      data.type !== 'browser_authentication'
+      || data.status !== 'authentication_required'
+      || typeof data.session_id !== 'string'
+      || !/^athena-[a-f0-9]{32}$/.test(data.session_id)
+      || typeof data.url !== 'string'
+      || !/^https?:\/\//i.test(data.url)
+      || typeof data.domain !== 'string'
+    ) return null;
+    return { data: data as BrowserAuthenticationMessage, prefix: candidate.prefix.trim() };
+  } catch {
+    return null;
+  }
+}
+
 export function assistantSpeechText(content: string) {
+	const browserAuthentication = parseBrowserAuthenticationMessage(content)?.data;
+	if (browserAuthentication) return browserAuthentication.message || `Authentication is required for ${browserAuthentication.domain}`;
   const clarification = parseClarificationMessage(content)?.data;
   if (!clarification) return content;
   return [clarification.intro, ...clarification.questions.map(item => item.question)].filter(Boolean).join(' ');

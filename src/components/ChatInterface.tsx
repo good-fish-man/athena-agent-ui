@@ -63,7 +63,12 @@ import { AVATAR_PRESETS } from '../hooks/useVoiceConversation';
 import { resolveAvatarSource } from './VoiceAvatar';
 import { useCustomAvatars } from '../hooks/useCustomAvatars';
 import { toast } from 'sonner';
-import { parseClarificationMessage, type ClarificationMessage } from '../lib/structuredMessage';
+import {
+  parseBrowserAuthenticationMessage,
+  parseClarificationMessage,
+  type BrowserAuthenticationMessage,
+  type ClarificationMessage
+} from '../lib/structuredMessage';
 
 // 辅助函数：检测并提取 Markdown 中的 HTML 代码块
 function extractHtmlFromMarkdown(content: string): { html: string | null; markdown: string; reportUrl: string | null; pptUrl: string | null } {
@@ -181,12 +186,91 @@ function ClarificationCard({ data, onAnswer }: { data: ClarificationMessage; onA
   );
 }
 
+function BrowserAuthenticationCard({ data, onAnswer }: { data: BrowserAuthenticationMessage; onAnswer?: (answer: string) => void }) {
+  const { t } = useTranslation();
+  const [submitted, setSubmitted] = React.useState<'completed' | 'cancelled' | null>(null);
+
+  const complete = () => {
+    setSubmitted('completed');
+    onAnswer?.([
+      'Browser authentication completed by the user.',
+      `session_id=${data.session_id}`,
+      `authenticated_url=${data.url}`,
+      'Continue with BrowserRead. Do not request or infer credentials.',
+    ].join('\n'));
+  };
+
+  const cancel = () => {
+    setSubmitted('cancelled');
+    onAnswer?.([
+      'Browser authentication was cancelled by the user.',
+      `session_id=${data.session_id}`,
+      'Close the session with BrowserClose and do not access the protected page.',
+    ].join('\n'));
+  };
+
+  return (
+    <div className="not-prose overflow-hidden rounded-2xl border border-amber-200 bg-amber-50/70">
+      <div className="flex items-start gap-3 border-b border-amber-200/70 px-4 py-4">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-700">
+          <ShieldAlert size={20} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-bold text-slate-900">{t('chat.browserAuthTitle')}</p>
+          <p className="mt-1 truncate text-xs font-semibold text-amber-800">{data.domain}</p>
+        </div>
+        <ExternalLink size={16} className="mt-1 shrink-0 text-amber-600" />
+      </div>
+      <div className="space-y-3 px-4 py-4">
+        <p className="text-xs leading-5 text-slate-700">{data.reason || t('chat.browserAuthReason')}</p>
+        <div className="rounded-xl bg-white/80 px-3 py-2.5 text-[11px] leading-5 text-slate-600">
+          {t('chat.browserAuthInstructions')}
+        </div>
+        <div className="flex items-start gap-2 text-[11px] leading-4 text-slate-500">
+          <ShieldAlert size={13} className="mt-0.5 shrink-0" />
+          <span>{t('chat.browserAuthSecurity')}</span>
+        </div>
+        <div className="flex gap-2 pt-1">
+          <button
+            type="button"
+            onClick={complete}
+            disabled={!onAnswer || submitted !== null}
+            className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-slate-900 px-3 py-2.5 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <UserCheck size={15} />
+            {submitted === 'completed' ? t('chat.browserAuthSubmitted') : t('chat.browserAuthComplete')}
+          </button>
+          <button
+            type="button"
+            onClick={cancel}
+            disabled={!onAnswer || submitted !== null}
+            className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-bold text-slate-600 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <XCircle size={15} />
+            {t('common.cancel')}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // 渲染消息内容组件
 function MessageContent({ content, htmlContent, reportUrl, pptUrl, onClarificationAnswer }: { content: string; htmlContent?: string; reportUrl?: string; pptUrl?: string; onClarificationAnswer?: (answer: string) => void }) {
   const { t } = useTranslation();
   const [iframeKey, setIframeKey] = React.useState(0);
   content = stripImagePlanningMarkup(stripInternalControlTags(sanitizeImageToolResult(content)));
+	const browserAuthentication = parseBrowserAuthenticationMessage(content);
   const clarification = parseClarificationMessage(content);
+
+	if (browserAuthentication) {
+		return (
+			<div className="space-y-3">
+				{browserAuthentication.prefix && <ReactMarkdown>{browserAuthentication.prefix}</ReactMarkdown>}
+				<BrowserAuthenticationCard data={browserAuthentication.data} onAnswer={onClarificationAnswer} />
+			</div>
+		);
+	}
 
   if (clarification) {
     return (
