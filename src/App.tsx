@@ -17,6 +17,7 @@ import { Settings } from './components/Settings';
 import { Inbox } from './components/Inbox';
 import { CommandCenter } from './components/CommandCenter';
 import { ProjectWorkspace } from './components/ProjectWorkspace';
+import { WebsiteAccounts } from './components/WebsiteAccounts';
 import { View, Agent } from './types';
 import { AnimatePresence, motion } from 'motion/react';
 import { Toaster } from 'sonner';
@@ -99,6 +100,8 @@ export default function App() {
         />;
       case 'workspace':
         return <ProjectWorkspace />;
+      case 'website-accounts':
+        return <WebsiteAccounts />;
       case 'knowledge':
         return <KnowledgeBaseManager pendingConfig={pendingKBConfig} onConfigConsumed={() => setPendingKBConfig(null)} />;
       case 'skills':
@@ -114,7 +117,7 @@ export default function App() {
       case 'settings':
         return <Settings />;
       case 'inbox':
-        return <Inbox />;
+        return <Inbox onViewChange={setActiveView} />;
       default:
         return <Dashboard onViewChange={setActiveView} />;
     }

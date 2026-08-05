@@ -1,6 +1,6 @@
 import type { ModelRuntimeMode } from './lib/runtimeConstants';
 
-export type View = 'dashboard' | 'orchestrator' | 'agents' | 'skills' | 'knowledge' | 'models' | 'media' | 'chat' | 'workspace' | 'settings' | 'inbox';
+export type View = 'dashboard' | 'orchestrator' | 'agents' | 'skills' | 'knowledge' | 'models' | 'media' | 'chat' | 'workspace' | 'website-accounts' | 'settings' | 'inbox';
 
 export interface Agent {
   ulid?: string;
@@ -17,7 +17,7 @@ export interface Agent {
   is_system?: boolean;
   enabled?: boolean;
   skills: string[];
-  tools: string[];
+  capabilities: string[];
   knowledgeBases?: string[];
   isBuiltIn?: boolean;
   channels?: string[];
@@ -77,8 +77,8 @@ export interface Skill {
   id: string;
   name: string;
   description: string;
-  type: 'built-in' | 'custom' | 'mcp' | 'a2a' | 'tool' | 'skill';
-  category: 'logic' | 'data' | 'web' | 'media' | 'mcp' | 'a2a' | 'tool';
+  type: 'built-in' | 'custom' | 'mcp' | 'a2a' | 'skill';
+  category: 'logic' | 'data' | 'web' | 'media' | 'mcp' | 'a2a';
   enabled: boolean;
   is_system?: boolean;
   content?: string;
@@ -134,9 +134,15 @@ export interface Message {
   thinking?: string;
   trace?: TraceStep[];
   toolCalls?: {
+    actionId?: string;
     name: string;
     args: any;
     result?: any;
+    progress?: number;
+    progressStage?: string;
+    progressMessage?: string;
+    bytes?: number;
+    total?: number;
     status?: 'pending' | 'running' | 'completed' | 'error';
   }[];
   recallInfo?: {

@@ -35,10 +35,12 @@ import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
-import { modelApi, skillApi, knowledgeBaseApi, agentApi, channelApi, chatApi } from '../lib/api';
+import { modelApi, skillApi, knowledgeBaseApi, agentApi, channelApi, chatApi, capabilityApi, RuntimeCapability } from '../lib/api';
 import { authStore } from '../lib/auth';
 import { Agent, Message, Variable } from '../types';
 import PromptAssistant from './PromptAssistant';
+
+const DEFAULT_RUNNER_ENDPOINT = import.meta.env.VITE_AGENT_RUNTIME_RUN_ENDPOINT || 'http://localhost:18080/run';
 
 interface AgentOrchestratorProps {
   editingAgent?: Agent | null;
@@ -51,14 +53,12 @@ interface SubAgentDraft {
   description: string;
   prompt: string;
   model_id: string;
-  tools: string[];
+  capabilities: string[];
   skill_ids: string[];
   max_iterations: number;
   timeout_ms: number;
   persisted?: boolean;
 }
-
-const SUB_AGENT_TOOLS = ['Glob', 'Grep', 'Read', 'Edit', 'Write', 'Bash', 'WebFetch', 'WebSearch'];
 
 export function AgentOrchestrator({ editingAgent, onSaved }: AgentOrchestratorProps) {
   const { t } = useTranslation();
@@ -69,6 +69,7 @@ export function AgentOrchestrator({ editingAgent, onSaved }: AgentOrchestratorPr
   const [backendKBs, setBackendKBs] = React.useState<any[]>([]);
   const [backendSkills, setBackendSkills] = React.useState<any[]>([]);
   const [backendChannels, setBackendChannels] = React.useState<any[]>([]);
+  const [runtimeCapabilities, setRuntimeCapabilities] = React.useState<RuntimeCapability[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [subAgents, setSubAgents] = React.useState<SubAgentDraft[]>([]);
   const [isSubAgentModalOpen, setIsSubAgentModalOpen] = React.useState(false);
@@ -79,11 +80,15 @@ export function AgentOrchestrator({ editingAgent, onSaved }: AgentOrchestratorPr
     const loadData = async () => {
       try {
         setLoading(true);
-        const [models, kbs, skills, channels] = await Promise.all([
+        const [models, kbs, skills, channels, capabilities] = await Promise.all([
           modelApi.findAll(),
           knowledgeBaseApi.findAll(),
           skillApi.findAll(),
           channelApi.findAll(),
+          capabilityApi.list().catch(error => {
+            console.warn('Capability catalog is unavailable; the runtime may need to be upgraded.', error);
+            return [];
+          }),
         ]);
         setBackendModels(models || []);
         setBackendKBs(kbs || []);
@@ -94,6 +99,7 @@ export function AgentOrchestrator({ editingAgent, onSaved }: AgentOrchestratorPr
         }));
         setBackendSkills(mappedSkills);
         setBackendChannels(channels || []);
+        setRuntimeCapabilities((capabilities || []).filter(capability => capability.status === 'available'));
       } catch (err) {
         console.error('Failed to load data:', err);
       } finally {
@@ -123,6 +129,7 @@ export function AgentOrchestrator({ editingAgent, onSaved }: AgentOrchestratorPr
     rerank: false,
     selectedKBs: [] as string[],
     selectedSkills: [] as string[],
+    selectedCapabilities: [] as string[],
     requireApproval: false,
     approvalThreshold: 'high' as 'low' | 'medium' | 'high',
     channels: ['web'] as string[],
@@ -137,7 +144,7 @@ export function AgentOrchestrator({ editingAgent, onSaved }: AgentOrchestratorPr
     retryCount: 3,
     retryInterval: 5,
     timeout: 60,
-    endpoint: 'http://localhost:18080/run',
+    endpoint: DEFAULT_RUNNER_ENDPOINT,
     maxIterations: 10,
     stream: true,
     sandbox: {
@@ -225,7 +232,7 @@ export function AgentOrchestrator({ editingAgent, onSaved }: AgentOrchestratorPr
         description: item.description || '',
         prompt: item.prompt || '',
         model_id: item.model_id || '',
-        tools: Array.isArray(item.tools) ? item.tools : [],
+        capabilities: Array.isArray(item.capabilities) ? item.capabilities : [],
         skill_ids: Array.isArray(item.skill_ids) ? item.skill_ids : [],
         max_iterations: item.max_iterations || 5,
         timeout_ms: item.timeout_ms || 120000,
@@ -265,6 +272,7 @@ export function AgentOrchestrator({ editingAgent, onSaved }: AgentOrchestratorPr
         rerank: parsedConfig.rerank ?? prev.rerank,
         selectedKBs: parsedConfig.selectedKBs || prev.selectedKBs,
         selectedSkills: parsedConfig.selectedSkills || prev.selectedSkills,
+        selectedCapabilities: parsedConfig.selectedCapabilities || prev.selectedCapabilities,
         requireApproval: parsedConfig.requireApproval ?? prev.requireApproval,
         approvalThreshold: parsedConfig.approvalThreshold || prev.approvalThreshold,
         channels: parsedChannels,
@@ -384,20 +392,6 @@ export function AgentOrchestrator({ editingAgent, onSaved }: AgentOrchestratorPr
 		  };
 		}
 
-        // 转换 skills (工具)
-        const tools = backendSkills
-          .filter(s => agentConfig.selectedSkills.includes(s.ulid || s.id))
-          .filter(s => s.skill_type === 'tool' || s.skill_type === 'mcp')
-          .map(s => ({
-            type: 'http',
-            name: s.name,
-            description: s.description || '',
-            endpoint: s.endpoint || s.path || '',
-            method: 'GET',
-            headers: {},
-            risk_level: s.riskLevel || 'low',
-          }));
-
         // 转换 skills (mcp)
         const mcps = backendSkills
           .filter(s => agentConfig.selectedSkills.includes(s.ulid || s.id))
@@ -466,7 +460,7 @@ export function AgentOrchestrator({ editingAgent, onSaved }: AgentOrchestratorPr
             model: selectedModel ? {
               extra_fields: { model_id: selectedModel.ulid || selectedModel.id },
             } : undefined,
-            tools: subAgent.tools.map(name => ({ name, type: 'builtin' })),
+            capabilities: subAgent.capabilities,
             skills: selectedSkills,
             max_iterations: subAgent.max_iterations,
             timeout_ms: subAgent.timeout_ms,
@@ -486,10 +480,10 @@ export function AgentOrchestrator({ editingAgent, onSaved }: AgentOrchestratorPr
 
         return {
           endpoint: agentConfig.endpoint,
+          capabilities: agentConfig.selectedCapabilities.map(id => ({ id })),
           models,
           system_prompt: agentConfig.systemPrompt,
           user_message: '',
-          tools,
           mcps,
           a2a: a2as,
           skills: skillsConfig,
@@ -568,6 +562,7 @@ export function AgentOrchestrator({ editingAgent, onSaved }: AgentOrchestratorPr
           topK: agentConfig.topK,
           rerank: agentConfig.rerank,
           selectedSkills: agentConfig.selectedSkills,
+          selectedCapabilities: agentConfig.selectedCapabilities,
           selectedKBs: agentConfig.selectedKBs,
           requireApproval: agentConfig.requireApproval,
           approvalThreshold: agentConfig.approvalThreshold,
@@ -663,10 +658,11 @@ export function AgentOrchestrator({ editingAgent, onSaved }: AgentOrchestratorPr
   const [testCheckpointId, setTestCheckpointId] = React.useState<string | null>(null);
 
   // Skill Category State
-  const [skillCategory, setSkillCategory] = React.useState<'all' | 'built-in' | 'mcp' | 'tool' | 'a2a' | 'skill'>('all');
+  const [skillCategory, setSkillCategory] = React.useState<'all' | 'mcp' | 'a2a' | 'skill'>('all');
 
   const filteredSkills = backendSkills.filter(skill =>
-    skillCategory === 'all' || skill.skill_type === skillCategory
+    (skill.skill_type === 'skill' || skill.skill_type === 'mcp' || skill.skill_type === 'a2a') &&
+    (skillCategory === 'all' || skill.skill_type === skillCategory)
   );
 
   const handleToggleKB = (kbId: string) => {
@@ -687,6 +683,15 @@ export function AgentOrchestrator({ editingAgent, onSaved }: AgentOrchestratorPr
     }));
   };
 
+  const handleToggleCapability = (capabilityId: string) => {
+    setAgentConfig(prev => ({
+      ...prev,
+      selectedCapabilities: prev.selectedCapabilities.includes(capabilityId)
+        ? prev.selectedCapabilities.filter(id => id !== capabilityId)
+        : [...prev.selectedCapabilities, capabilityId],
+    }));
+  };
+
   const handleToggleChannel = (channel: string) => {
     setAgentConfig(prev => ({
       ...prev,
@@ -704,7 +709,7 @@ export function AgentOrchestrator({ editingAgent, onSaved }: AgentOrchestratorPr
       description: '',
       prompt: '',
       model_id: '',
-      tools: [],
+      capabilities: [],
       skill_ids: [],
       max_iterations: 5,
       timeout_ms: 120000,
@@ -1193,7 +1198,7 @@ export function AgentOrchestrator({ editingAgent, onSaved }: AgentOrchestratorPr
                 { id: 'trigger', label: t('orchestrator.pipelineTrigger'), icon: Zap, active: true },
                 { id: 'retrieval', label: t('orchestrator.knowledgeBases'), icon: Database, active: agentConfig.selectedKBs.length > 0 },
                 { id: 'reasoning', label: t('orchestrator.pipelineReasoning'), icon: Brain, active: true },
-                { id: 'tools', label: t('orchestrator.pipelineTools'), icon: Wrench, active: agentConfig.selectedSkills.length > 0 },
+                { id: 'capabilities', label: 'Capabilities', icon: Wrench, active: agentConfig.selectedCapabilities.length > 0 || runtimeCapabilities.length > 0 },
                 { id: 'approval', label: t('orchestrator.pipelineApproval'), icon: ShieldAlert, active: agentConfig.requireApproval },
                 { id: 'response', label: t('orchestrator.pipelineResponse'), icon: Sparkles, active: true },
               ].map((step, idx, arr) => (
@@ -1490,7 +1495,48 @@ export function AgentOrchestrator({ editingAgent, onSaved }: AgentOrchestratorPr
             )}
           </section>
 
-          {/* Skills & Tools */}
+          {/* Runtime capabilities */}
+          <section className="space-y-4">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-center gap-2 text-slate-900">
+                <Wrench size={18} className="text-brand-500" />
+                <div>
+                  <h2 className="font-bold">Capabilities</h2>
+                  <p className="text-[10px] text-slate-500 mt-0.5">Stable abilities selected independently from their tool providers. Leave empty for automatic task-based selection.</p>
+                </div>
+              </div>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                {agentConfig.selectedCapabilities.length} selected
+              </span>
+            </div>
+            <div className="grid grid-cols-2 xl:grid-cols-3 gap-3">
+              {runtimeCapabilities.map(capability => (
+                <button
+                  key={capability.id}
+                  type="button"
+                  onClick={() => handleToggleCapability(capability.id)}
+                  className={cn(
+                    "p-3 rounded-xl border-2 text-left transition-all",
+                    agentConfig.selectedCapabilities.includes(capability.id)
+                      ? "bg-brand-50 border-brand-500"
+                      : "bg-white border-slate-100 hover:border-slate-200"
+                  )}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-mono font-bold text-slate-900">{capability.id}</span>
+                    <span className={cn(
+                      "text-[8px] font-bold uppercase px-1.5 py-0.5 rounded-full",
+                      capability.risk === 'high' ? "bg-red-100 text-red-600" :
+                        capability.risk === 'medium' ? "bg-amber-100 text-amber-600" : "bg-emerald-100 text-emerald-600"
+                    )}>{capability.risk}</span>
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-1.5 line-clamp-2">{capability.description}</p>
+                </button>
+              ))}
+            </div>
+          </section>
+
+          {/* Skills and external providers */}
           <section className="space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-slate-900">
@@ -1500,7 +1546,7 @@ export function AgentOrchestrator({ editingAgent, onSaved }: AgentOrchestratorPr
 
               {/* Skill Category Tabs */}
               <div className="flex p-1 bg-slate-100 rounded-lg">
-                {(['all', 'skill', 'mcp', 'tool', 'a2a'] as const).map((cat) => (
+                {(['all', 'skill', 'mcp', 'a2a'] as const).map((cat) => (
                   <button
                     key={cat}
                     onClick={() => setSkillCategory(cat)}
@@ -1626,9 +1672,9 @@ export function AgentOrchestrator({ editingAgent, onSaved }: AgentOrchestratorPr
                           <p className="text-[10px] text-slate-500 line-clamp-2 font-mono">{agent.prompt}</p>
                         </div>
                       )}
-                      {(agent.tools.length > 0 || agent.skill_ids.length > 0) && (
+                      {(agent.capabilities.length > 0 || agent.skill_ids.length > 0) && (
                         <div className="mt-2 flex flex-wrap gap-1.5">
-                          {agent.tools.map(tool => <span key={tool} className="px-2 py-0.5 rounded bg-slate-100 text-[10px] text-slate-600">{tool}</span>)}
+                          {agent.capabilities.map(capability => <span key={capability} className="px-2 py-0.5 rounded bg-slate-100 text-[10px] font-mono text-slate-600">{capability}</span>)}
                           {agent.skill_ids.map(skillId => <span key={skillId} className="px-2 py-0.5 rounded bg-emerald-50 text-[10px] text-emerald-700">{backendSkills.find(skill => (skill.ulid || skill.id) === skillId)?.name || skillId}</span>)}
                         </div>
                       )}
@@ -1825,7 +1871,7 @@ export function AgentOrchestrator({ editingAgent, onSaved }: AgentOrchestratorPr
                 type="text"
                 value={agentConfig.endpoint}
                 onChange={(e) => setAgentConfig(prev => ({ ...prev, endpoint: e.target.value }))}
-                placeholder="http://localhost:18080/run"
+                placeholder={DEFAULT_RUNNER_ENDPOINT}
                 className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/20"
               />
             </div>
@@ -2490,19 +2536,21 @@ export function AgentOrchestrator({ editingAgent, onSaved }: AgentOrchestratorPr
               </div>
 
               <div className="space-y-3">
-                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">允许的工具</label>
+                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Capabilities</label>
                 <div className="grid grid-cols-2 gap-2">
-                  {SUB_AGENT_TOOLS.map(tool => (
-                    <label key={tool} className="flex items-center gap-2 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-700 cursor-pointer">
+                  {runtimeCapabilities.map(capability => (
+                    <label key={capability.id} className="flex items-center gap-2 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-700 cursor-pointer">
                       <input
                         type="checkbox"
-                        checked={editingSubAgent.tools.includes(tool)}
+                        checked={editingSubAgent.capabilities.includes(capability.id)}
                         onChange={() => setEditingSubAgent(prev => prev ? ({
                           ...prev,
-                          tools: prev.tools.includes(tool) ? prev.tools.filter(item => item !== tool) : [...prev.tools, tool],
+                          capabilities: prev.capabilities.includes(capability.id)
+                            ? prev.capabilities.filter(item => item !== capability.id)
+                            : [...prev.capabilities, capability.id],
                         }) : prev)}
                       />
-                      {tool}
+                      <span className="font-mono">{capability.id}</span>
                     </label>
                   ))}
                 </div>

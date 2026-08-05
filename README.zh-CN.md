@@ -11,6 +11,8 @@ Athena Agent UI 是 Athena Agent 平台的浏览器界面。它连接 [`agent-ru
 - Agent 创建器支持 LLM、Embedding、图片模型、Skills、Tools、知识库、记忆、沙箱和 Sub-Agents。
 - 按 Agent 隔离聊天历史，支持流式文本、工具事件、生成媒体、审批和语音输入/输出。
 - 模型 Key 管理、云端/本地模型、本地下载、生命周期控制、微调与蒸馏。
+- 网站账号使用 agent-browser Auth Vault 加密保存，并在聊天中按域名提供辅助登录卡片。
+- Inbox 可管理聊天创建的票务、库存和号源监控，支持暂停、恢复及交互式结果复核。
 - 项目目录导入、文件树/搜索、自然语言整体优化、补丁预览、单文件 Diff 和补丁应用。
 - Skills、知识库、渠道、Inbox 和命令中心。
 - Client、Runtime 与 Skills 配置、状态检查和受控服务重启。

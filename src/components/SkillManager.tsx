@@ -29,12 +29,12 @@ import { Skill } from '../types';
 import { skillApi, Skill as BackendSkill } from '../lib/api';
 
 interface SkillManagerProps {
-  initialTab?: 'skills' | 'a2a' | 'tools' | 'mcp';
+  initialTab?: 'skills' | 'a2a' | 'mcp';
 }
 
 export function SkillManager({ initialTab = 'skills' }: SkillManagerProps) {
   const { t } = useTranslation();
-  const [activeTab, setActiveTab] = useState<'skills' | 'a2a' | 'tools' | 'mcp'>(initialTab);
+  const [activeTab, setActiveTab] = useState<'skills' | 'a2a' | 'mcp'>(initialTab);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
@@ -62,7 +62,7 @@ export function SkillManager({ initialTab = 'skills' }: SkillManagerProps) {
         name: s.name,
         description: s.description || '',
         type: (s.skill_type || 'custom') as Skill['type'],
-        category: (s.skill_type || 'tool') as Skill['category'],
+        category: (s.skill_type || 'logic') as Skill['category'],
         enabled: s.enabled ?? true,
         is_system: s.is_system ?? false,
         icon: s.skill_type === 'mcp' ? 'Terminal' : s.skill_type === 'a2a' ? 'Link' : 'Wrench',
@@ -134,13 +134,12 @@ export function SkillManager({ initialTab = 'skills' }: SkillManagerProps) {
     try {
       setLoading(true);
       // 转换 activeTab 为后端接受的 skillType
-      const skillTypeMap: Record<string, 'mcp' | 'tool' | 'a2a' | 'skill'> = {
+      const skillTypeMap: Record<string, 'mcp' | 'a2a' | 'skill'> = {
         'mcp': 'mcp',
         'a2a': 'a2a',
         'skills': 'skill',
-        'tools': 'tool'
       };
-      const skillType = skillTypeMap[activeTab] || 'tool';
+      const skillType = skillTypeMap[activeTab] || 'skill';
       console.log('Creating skill - activeTab:', activeTab, 'skillType:', skillType);
       // 调用后端 API 创建 skill
       const result = await skillApi.create({
@@ -229,7 +228,6 @@ export function SkillManager({ initialTab = 'skills' }: SkillManagerProps) {
   const filteredSkills = skills.filter(s => {
     if (activeTab === 'mcp') return s.type === 'mcp';
     if (activeTab === 'a2a') return s.type === 'a2a';
-    if (activeTab === 'tools') return s.type === 'tool';
     return s.type === 'built-in' || s.type === 'custom' || s.type === 'skill';
   });
 
@@ -246,7 +244,7 @@ export function SkillManager({ initialTab = 'skills' }: SkillManagerProps) {
           </div>
           <div>
             <h1 className="text-2xl font-bold text-slate-900">
-              {activeTab === 'mcp' ? 'mcp' : activeTab === 'a2a' ? 'A2A' : activeTab === 'tools' ? 'tool' : t('skills.title')}
+              {activeTab === 'mcp' ? 'mcp' : activeTab === 'a2a' ? 'A2A' : t('skills.title')}
             </h1>
             <p className="text-slate-500 text-sm">
               {activeTab === 'mcp' ? t('skills.mcpAutoLoad') : t('skills.subtitle')}
@@ -290,7 +288,7 @@ export function SkillManager({ initialTab = 'skills' }: SkillManagerProps) {
       </div>
 
       <div className="flex gap-1 p-1 bg-slate-100 rounded-xl mb-8 w-fit">
-        {(['skills', 'mcp', 'tools', 'a2a'] as const).map((tab) => (
+        {(['skills', 'mcp', 'a2a'] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -400,14 +398,13 @@ export function SkillManager({ initialTab = 'skills' }: SkillManagerProps) {
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className={cn(
             "bg-white rounded-2xl w-full shadow-2xl overflow-hidden flex flex-col max-h-[90vh]",
-            activeTab === 'tools' ? "max-w-xl" : "max-w-3xl"
+            "max-w-3xl"
           )}>
             <div className="p-6 border-b border-slate-100 flex items-center justify-between shrink-0">
               <h2 className="text-xl font-bold text-slate-900">
                 {activeTab === 'skills' ? t('skills.createSkill') :
                   activeTab === 'mcp' ? t('skills.createMcp') :
-                    activeTab === 'a2a' ? t('skills.createA2A') :
-                      t('skills.createTool')}
+                    t('skills.createA2A')}
               </h2>
               <button onClick={() => setIsAddModalOpen(false)} className="text-slate-400 hover:text-slate-600">
                 <X size={24} />
@@ -632,76 +629,6 @@ export function SkillManager({ initialTab = 'skills' }: SkillManagerProps) {
                 </>
               )}
 
-              {/* Tool Specific */}
-              {activeTab === 'tools' && (
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">
-                      {t('skills.description')}
-                    </label>
-                    <textarea
-                      value={formData.description}
-                      onChange={e => setFormData({ ...formData, description: e.target.value })}
-                      placeholder="Tool description"
-                      className="w-full h-20 px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none transition-all text-sm resize-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                      {t('skills.toolEndpoint')}
-                    </label>
-                    <input
-                      type="text"
-                      value={formData.endpoint}
-                      onChange={e => setFormData({ ...formData, endpoint: e.target.value })}
-                      placeholder={t('skills.placeholderToolEndpoint')}
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none transition-all text-sm"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                      {t('skills.toolToken')}
-                    </label>
-                    <input
-                      type="password"
-                      value={formData.token}
-                      onChange={e => setFormData({ ...formData, token: e.target.value })}
-                      placeholder="Bearer Token"
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none transition-all text-sm"
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                        {t('skills.toolMethod')}
-                      </label>
-                      <div className="relative">
-                        <select
-                          value={formData.method}
-                          onChange={e => setFormData({ ...formData, method: e.target.value as any })}
-                          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none transition-all text-sm appearance-none"
-                        >
-                          <option value="POST">POST</option>
-                          <option value="GET">GET</option>
-                        </select>
-                        <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                        {t('skills.toolTimeout')}
-                      </label>
-                      <input
-                        type="number"
-                        value={formData.timeout}
-                        onChange={e => setFormData({ ...formData, timeout: parseInt(e.target.value) })}
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none transition-all text-sm"
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
 
             <div className="p-6 bg-slate-50 flex justify-end gap-3">
@@ -727,15 +654,14 @@ export function SkillManager({ initialTab = 'skills' }: SkillManagerProps) {
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className={cn(
             "bg-white rounded-2xl w-full shadow-2xl overflow-hidden flex flex-col max-h-[90vh]",
-            selectedSkill.type === 'tool' ? "max-w-xl" : "max-w-3xl"
+            "max-w-3xl"
           )}>
             {/* Modal Header */}
             <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-white sticky top-0 z-10">
               <h2 className="text-xl font-bold text-slate-900">
                 {selectedSkill.type === 'custom' || selectedSkill.type === 'built-in' ? t('skills.view') + ' ' + t('skills.skillsTab') :
                   selectedSkill.type === 'mcp' ? t('skills.view') + ' ' + t('skills.mcpTab') :
-                    selectedSkill.type === 'a2a' ? t('skills.view') + ' ' + t('skills.a2aTab') :
-                      t('skills.view') + ' ' + t('skills.toolsTab')}
+                    t('skills.view') + ' ' + t('skills.a2aTab')}
               </h2>
               <button
                 onClick={() => setIsViewModalOpen(false)}
@@ -878,74 +804,6 @@ export function SkillManager({ initialTab = 'skills' }: SkillManagerProps) {
                 </>
               )}
 
-              {/* Tool Specific */}
-              {selectedSkill.type === 'tool' && (
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                      {t('skills.toolEndpoint')}
-                    </label>
-                    <div className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-brand-600 break-all">
-                      {selectedSkill.endpoint}
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                      {t('skills.toolSandbox')}
-                    </label>
-                    <div className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-500 break-all">
-                      {selectedSkill.sandboxEndpoint || 'Not configured'}
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                      {t('skills.toolToken')}
-                    </label>
-                    <div className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-500">
-                      {selectedSkill.token ? '••••••••' : 'None'}
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                        {t('skills.toolMethod')}
-                      </label>
-                      <div className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold">
-                        {selectedSkill.method || 'POST'}
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                        {t('skills.toolTimeout')}
-                      </label>
-                      <div className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold">
-                        {selectedSkill.timeout} ms
-                      </div>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                        {t('skills.toolRisk')}
-                      </label>
-                      <div className={cn(
-                        "w-full px-3 py-2 border rounded-lg text-sm font-bold uppercase",
-                        selectedSkill.riskLevel === 'high' ? "bg-red-50 border-red-100 text-red-600" : "bg-blue-50 border-blue-100 text-blue-600"
-                      )}>
-                        {selectedSkill.riskLevel || 'low'}
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                        {t('skills.toolSandboxToken')}
-                      </label>
-                      <div className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-500">
-                        {selectedSkill.sandboxToken ? '••••••••' : 'None'}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
 
             <div className="p-6 bg-slate-50 flex justify-end">

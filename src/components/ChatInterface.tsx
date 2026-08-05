@@ -14,6 +14,7 @@ import {
   Zap,
   FileText,
   FileSearch,
+  FolderSearch,
   BarChart3,
   MapPin,
   Sun,
@@ -47,14 +48,16 @@ import {
   Clock,
   Presentation,
   Download,
-  UserRound
+  UserRound,
+  Loader2,
+  KeyRound
 } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
 import { cn } from '../lib/utils';
 import { Message, FileInfo, Agent, Conversation, PendingApproval, ChatSession } from '../types';
-import { agentApi, chatApi, REPORT_API_BASE, type RunHistoryMessage } from '../lib/api';
+import { agentApi, chatApi, controlApi, REPORT_API_BASE, siteCredentialApi, type RunHistoryMessage, type SiteCredential } from '../lib/api';
 import { useTranslation } from 'react-i18next';
 import { authStore } from '../lib/auth';
 import { useVoiceConversation } from '../hooks/useVoiceConversation';
@@ -69,6 +72,9 @@ import {
   type BrowserAuthenticationMessage,
   type ClarificationMessage
 } from '../lib/structuredMessage';
+import { currentLocationForMessage } from '../lib/geolocation';
+import { desktopPermissions } from '../lib/desktopPermissions';
+import { formatAssistantOutput } from '../lib/outputFormatting';
 
 // 辅助函数：检测并提取 Markdown 中的 HTML 代码块
 function extractHtmlFromMarkdown(content: string): { html: string | null; markdown: string; reportUrl: string | null; pptUrl: string | null } {
@@ -189,25 +195,43 @@ function ClarificationCard({ data, onAnswer }: { data: ClarificationMessage; onA
 function BrowserAuthenticationCard({ data, onAnswer }: { data: BrowserAuthenticationMessage; onAnswer?: (answer: string) => void }) {
   const { t } = useTranslation();
   const [submitted, setSubmitted] = React.useState<'completed' | 'cancelled' | null>(null);
+	const [accounts, setAccounts] = React.useState<SiteCredential[]>([]);
+	const [accountsLoading, setAccountsLoading] = React.useState(true);
+	const [loginID, setLoginID] = React.useState('');
+	const [loginStarted, setLoginStarted] = React.useState(false);
 
-  const complete = () => {
-    setSubmitted('completed');
-    onAnswer?.([
-      'Browser authentication completed by the user.',
-      `session_id=${data.session_id}`,
-      `authenticated_url=${data.url}`,
-      'Continue with BrowserRead. Do not request or infer credentials.',
-    ].join('\n'));
-  };
+	React.useEffect(() => {
+		let active = true;
+		setAccountsLoading(true);
+		siteCredentialApi.findAll(data.domain)
+			.then(items => { if (active) setAccounts(items.filter(item => item.enabled)); })
+			.catch(() => { if (active) setAccounts([]); })
+			.finally(() => { if (active) setAccountsLoading(false); });
+		return () => { active = false; };
+	}, [data.domain]);
 
-  const cancel = () => {
-    setSubmitted('cancelled');
-    onAnswer?.([
-      'Browser authentication was cancelled by the user.',
-      `session_id=${data.session_id}`,
-      'Close the session with BrowserClose and do not access the protected page.',
-    ].join('\n'));
-  };
+	const useAccount = async (account: SiteCredential) => {
+		setLoginID(account.ulid);
+		try {
+			await siteCredentialApi.login(account.ulid, data.session_id);
+			setLoginStarted(true);
+			toast.info(t('chat.browserAuthVerify'));
+		} catch (error) {
+			toast.error(error instanceof Error ? error.message : t('chat.browserAuthLoginFailed'));
+		} finally {
+			setLoginID('');
+		}
+	};
+
+	  const complete = () => {
+	    setSubmitted('completed');
+	    onAnswer?.(`I completed the browser authentication for ${data.domain}.`);
+	  };
+
+	  const cancel = () => {
+	    setSubmitted('cancelled');
+	    onAnswer?.(`I cancelled the browser authentication for ${data.domain}.`);
+	  };
 
   return (
     <div className="not-prose overflow-hidden rounded-2xl border border-amber-200 bg-amber-50/70">
@@ -230,6 +254,22 @@ function BrowserAuthenticationCard({ data, onAnswer }: { data: BrowserAuthentica
           <ShieldAlert size={13} className="mt-0.5 shrink-0" />
           <span>{t('chat.browserAuthSecurity')}</span>
         </div>
+		<div className="rounded-xl border border-amber-200/70 bg-white/80 p-3">
+			<p className="mb-2 flex items-center gap-2 text-[11px] font-bold text-slate-700"><KeyRound size={13} />{t('chat.browserAuthAccounts')}</p>
+			{accountsLoading ? <Loader2 size={16} className="animate-spin text-amber-600" /> : accounts.length === 0 ? (
+				<p className="text-[11px] text-slate-400">{t('chat.browserAuthNoAccounts')}</p>
+			) : (
+				<div className="space-y-2">
+					{accounts.map(account => (
+						<button key={account.ulid} type="button" disabled={Boolean(loginID) || submitted !== null} onClick={() => void useAccount(account)} className="flex w-full items-center justify-between gap-3 rounded-lg border border-slate-100 px-3 py-2 text-left hover:border-amber-300 disabled:opacity-50">
+							<span className="min-w-0"><span className="block truncate text-xs font-bold text-slate-800">{account.name}</span><span className="block truncate font-mono text-[10px] text-slate-400">{account.username_masked}</span></span>
+							<span className="flex shrink-0 items-center gap-1 text-[10px] font-bold text-amber-700">{loginID === account.ulid && <Loader2 size={12} className="animate-spin" />}{loginID === account.ulid ? t('chat.browserAuthLoggingIn') : t('chat.browserAuthUseAccount')}</span>
+						</button>
+					))}
+				</div>
+			)}
+		</div>
+		{loginStarted && <p className="rounded-xl bg-emerald-50 px-3 py-2 text-[11px] font-semibold leading-5 text-emerald-700">{t('chat.browserAuthVerify')}</p>}
         <div className="flex gap-2 pt-1">
           <button
             type="button"
@@ -255,11 +295,69 @@ function BrowserAuthenticationCard({ data, onAnswer }: { data: BrowserAuthentica
   );
 }
 
+function formatToolPayload(value: unknown): string {
+  if (value === undefined || value === null || value === '') return '(无输出)';
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function formatObservationResult(data: any): string {
+  if (!data) return '(无输出)';
+  const lines: string[] = [];
+  if (data.status) lines.push(`Status: ${data.status}`);
+  if (data.error) lines.push(`Error: ${data.error}`);
+  if (data.session_id) lines.push(`Session: ${data.session_id}`);
+  if (data.state) lines.push(`State:\n${formatToolPayload(data.state)}`);
+  return lines.join('\n\n') || formatToolPayload(data);
+}
+
+function formatProgressResult(data: any): string {
+  if (!data) return 'Working...';
+  const lines: string[] = [];
+  if (data.message) lines.push(String(data.message));
+  if (data.stage) lines.push(`Stage: ${data.stage}`);
+  if (typeof data.bytes === 'number' && data.bytes > 0) {
+    const total = typeof data.total === 'number' && data.total > 0 ? ` / ${formatBytes(data.total)}` : '';
+    lines.push(`Downloaded: ${formatBytes(data.bytes)}${total}`);
+  }
+  if (data.state?.path) lines.push(`Path: ${data.state.path}`);
+  return lines.join('\n') || formatToolPayload(data);
+}
+
+function formatBytes(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let size = value;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024;
+    unit += 1;
+  }
+  return `${size >= 10 || unit === 0 ? size.toFixed(0) : size.toFixed(1)} ${units[unit]}`;
+}
+
+function lastRunningToolCallIndex(toolCalls: Message['toolCalls']): number {
+  if (!toolCalls) return -1;
+  for (let index = toolCalls.length - 1; index >= 0; index -= 1) {
+    if (toolCalls[index].status === 'running') return index;
+  }
+  return -1;
+}
+
+function isToolResultError(result: unknown, status?: string): boolean {
+  if (status === 'error') return true;
+  return typeof result === 'string' && result.startsWith('错误:');
+}
+
 // 渲染消息内容组件
 function MessageContent({ content, htmlContent, reportUrl, pptUrl, onClarificationAnswer }: { content: string; htmlContent?: string; reportUrl?: string; pptUrl?: string; onClarificationAnswer?: (answer: string) => void }) {
   const { t } = useTranslation();
   const [iframeKey, setIframeKey] = React.useState(0);
-  content = stripImagePlanningMarkup(stripInternalControlTags(sanitizeImageToolResult(content)));
+  content = formatAssistantOutput(stripImagePlanningMarkup(stripInternalControlTags(sanitizeImageToolResult(content))));
 	const browserAuthentication = parseBrowserAuthenticationMessage(content);
   const clarification = parseClarificationMessage(content);
 
@@ -622,13 +720,19 @@ function hasRecentGeneratedImage(messages: Message[]): boolean {
 export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: ChatInterfaceProps) {
 	const currentUserId = authStore.userID();
   const { t, i18n } = useTranslation();
+	const [voiceLanguage, setVoiceLanguage] = React.useState(() => localStorage.getItem('chat.voice.language') || 'en-US');
+	const autoBoundDeviceRef = React.useRef<string>('');
   const [messages, setMessages] = React.useState<Message[]>([]);
+	const messagesRef = React.useRef<Message[]>([]);
+	React.useEffect(() => {
+		messagesRef.current = messages;
+	}, [messages]);
   const [input, setInput] = React.useState('');
   const [liveTranscript, setLiveTranscript] = React.useState('');
   const inputRef = React.useRef('');
   const voiceSendRef = React.useRef<(text: string) => void>(() => {});
   const voice = useVoiceConversation({
-    language: i18n.resolvedLanguage?.startsWith('zh') ? 'zh-CN' : i18n.resolvedLanguage || navigator.language,
+		language: voiceLanguage,
     onTranscript: text => {
       inputRef.current = text;
       setInput(text);
@@ -639,6 +743,32 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
       voiceSendRef.current(text);
     },
   });
+	React.useEffect(() => {
+		localStorage.setItem('chat.voice.language', voiceLanguage);
+	}, [voiceLanguage]);
+	React.useEffect(() => {
+		if (!currentUserId) return;
+		let active = true;
+		const bindLatestUnownedDevice = async () => {
+			try {
+				const devices = await controlApi.devices();
+				if (!active) return;
+				const device = devices.find(item => item.online && !item.user_id);
+				if (!device || autoBoundDeviceRef.current === device.id) return;
+				await controlApi.bindDevice(device.id);
+				autoBoundDeviceRef.current = device.id;
+				if (active) toast.success(t('chat.desktopDeviceBound'));
+			} catch (error) {
+				console.debug('[control] auto-bind desktop device skipped', error);
+			}
+		};
+		void bindLatestUnownedDevice();
+		window.addEventListener('focus', bindLatestUnownedDevice);
+		return () => {
+			active = false;
+			window.removeEventListener('focus', bindLatestUnownedDevice);
+		};
+	}, [currentUserId, t]);
   const customAvatars = useCustomAvatars();
   const avatarUploadRef = React.useRef<HTMLInputElement | null>(null);
   const avatarSource = React.useMemo(
@@ -662,6 +792,40 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
     }
   };
   const [files, setFiles] = React.useState<FileInfo[]>([]);
+	const localRootStorageKey = `athena.chat.local-file-roots.${currentUserId || 'anonymous'}`;
+	const [localFileRoots, setLocalFileRoots] = React.useState<string[]>(() => {
+		try {
+			const value = JSON.parse(localStorage.getItem(localRootStorageKey) || '[]');
+			return Array.isArray(value) ? value.filter(item => typeof item === 'string') : [];
+		} catch {
+			return [];
+		}
+	});
+	React.useEffect(() => {
+		localStorage.setItem(localRootStorageKey, JSON.stringify(localFileRoots));
+	}, [localFileRoots, localRootStorageKey]);
+		const [desktopBridgeAvailable, setDesktopBridgeAvailable] = React.useState(false);
+		React.useEffect(() => {
+			let active = true;
+			void desktopPermissions.available().then(available => {
+				if (active) setDesktopBridgeAvailable(available);
+			});
+		return () => { active = false; };
+	}, []);
+	const authorizeLocalFolder = async () => {
+		if (!desktopBridgeAvailable) {
+			toast.error(t('chat.localFolderRemoteUnavailable'));
+			return;
+		}
+		try {
+			const path = await desktopPermissions.selectFolder();
+			if (!path) return;
+			setLocalFileRoots(current => current.includes(path) ? current : [...current, path]);
+			toast.success(t('chat.localFolderAuthorized'));
+		} catch (error) {
+			toast.error(error instanceof Error ? error.message : t('chat.localFolderFailed'));
+		}
+	};
   const filesRef = React.useRef<FileInfo[]>([]); // 用于跟踪当前文件，异步更新
   const pendingFilesRef = React.useRef<File[]>([]); // 保存待上传的原始 File 对象
   const [agents, setAgents] = React.useState<Agent[]>([]);
@@ -861,13 +1025,16 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
     noClick: true
   } as any);
 
-  const handleSend = async (voiceText?: string) => {
-    const currentFiles = filesRef.current;
+  const handleSend = async (voiceText?: string, options: { hidden?: boolean; sessionId?: string } = {}) => {
+	const hidden = options.hidden === true;
+    const currentFiles = hidden ? [] : filesRef.current;
     const messageText = typeof voiceText === 'string' ? voiceText.trim() : inputRef.current.trim();
     console.log('[handleSend] called, currentFiles:', currentFiles, 'input:', messageText);
-    if ((!messageText && currentFiles.length === 0) || isLoading || !activeAgent) return;
-    if (voice.isListening) voice.stopListening();
-    if (voice.isSpeaking) voice.stopSpeaking();
+    if ((!messageText && currentFiles.length === 0) || (!hidden && isLoading) || !activeAgent) return;
+	if (!hidden) {
+		if (voice.isListening) voice.stopListening();
+		if (voice.isSpeaking) voice.stopSpeaking();
+	}
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -877,19 +1044,22 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
       files: [...currentFiles]
     };
 
-    setMessages(prev => [...prev, userMessage]);
-    setInput('');
-    inputRef.current = '';
-    setFiles([]);
-    filesRef.current = [];
+	if (!hidden) {
+		setMessages(prev => [...prev, userMessage]);
+		setInput('');
+		inputRef.current = '';
+		setFiles([]);
+		filesRef.current = [];
+	}
     setIsLoading(true);
     checkpointIdRef.current = null;
     userInitiatedStopRef.current = false;
     abortControllerRef.current = new AbortController();
+	let activeAssistantMessageId: string | null = null;
 
     try {
       // Get session ID - create session if needed
-      let sessionId = currentSession?.ulid || activeConversationId;
+      let sessionId = options.sessionId || currentSession?.ulid || activeConversationId;
       console.log('[handleSend] sessionId:', sessionId, 'currentFiles:', currentFiles.length);
       // Use first 50 chars of input as session title
       const sessionTitle = messageText.length > 50 ? messageText.substring(0, 50) + '...' : messageText;
@@ -930,7 +1100,7 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
       // 如果有待上传的文件，先上传
       let filesToSend = currentFiles;
       console.log('[handleSend] pendingFilesRef.current.length:', pendingFilesRef.current.length);
-      if (pendingFilesRef.current.length > 0) {
+      if (!hidden && pendingFilesRef.current.length > 0) {
         console.log('[handleSend] Uploading pending files first, count:', pendingFilesRef.current.length);
         try {
           const result = await chatApi.uploadFiles(sessionId, pendingFilesRef.current);
@@ -958,28 +1128,35 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
 
       // Save user message to database (with files if present)
       let userMessageUlid: string | null = null;
-      try {
-        const filesJson = filesToSend.length > 0 ? JSON.stringify(filesToSend) : undefined;
-        const userMsgResult = await chatApi.createMessage({
-          session_id: sessionId,
-          role: 'user',
-          content: messageText,
-          status: 'completed',
-          files: filesJson
-        });
-        userMessageUlid = userMsgResult.ulid;
-      } catch (err) {
-        console.error('Failed to save user message:', err);
-      }
+		if (!hidden) {
+			try {
+				const filesJson = filesToSend.length > 0 ? JSON.stringify(filesToSend) : undefined;
+				const userMsgResult = await chatApi.createMessage({
+					session_id: sessionId,
+					role: 'user',
+					content: messageText,
+					status: 'completed',
+					files: filesJson
+				});
+				userMessageUlid = userMsgResult.ulid;
+			} catch (err) {
+				console.error('Failed to save user message:', err);
+			}
+			}
 
-      // 调用 runner API
+	      // 调用 runner API
       console.log('[handleSend] Calling runner with filesToSend:', filesToSend);
       // 组装最近会话历史（不含本轮输入，本轮走 prompt 字段），让聊天模型跨轮次
       // 知道上下文——包括之前是否已用图像模型生成过图片。
-      const runHistory = buildRunHistory(messages);
-      if (hasRecentGeneratedImage(messages)) {
+      const runHistory = buildRunHistory(messagesRef.current);
+      if (hasRecentGeneratedImage(messagesRef.current)) {
         runHistory.unshift({ role: 'system', content: t('multimodal.imageContinuityHint') });
       }
+		const currentLocation = hidden ? null : await currentLocationForMessage(messageText);
+		const runtimeContext: Record<string, unknown> = {};
+			if (currentLocation) runtimeContext.current_location = currentLocation;
+			if (desktopBridgeAvailable) runtimeContext.desktop_bridge = true;
+			if (desktopBridgeAvailable) runtimeContext.browser_controller = true;
       const runResponse = await chatApi.runAgentStream({
         agent_id: activeAgent.ulid || activeAgent.id,
 		user_id: currentUserId,
@@ -987,6 +1164,7 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
         input: messageText,
         files: filesToSend.length > 0 ? filesToSend : undefined,
         history: runHistory.length > 0 ? runHistory : undefined,
+		context: Object.keys(runtimeContext).length > 0 ? runtimeContext : undefined,
         is_test: false,
         signal: abortControllerRef.current.signal
       });
@@ -1003,8 +1181,11 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
         }
 
         const assistantMsgId = (Date.now() + 1).toString();
+		activeAssistantMessageId = assistantMsgId;
         let accumulatedContent = '';
         let finalAssistantContent = '';
+		let streamCompleted = false;
+		let streamErrorMessage = '';
         let internalControlTagStripped = false;
         let invalidImagePlanningOutput = false;
         let streamTokenUsage: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } = {};
@@ -1064,10 +1245,49 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
                     console.log('[SSE] checkpoint_id:', checkpointIdRef.current);
                   }
 
-                  if (currentEventType === 'delta' && data.text) {
+				  if (currentEventType === 'delta' && data.text) {
                     accumulatedContent += data.text;
                     updateMessage({ content: accumulatedContent });
-                  }
+				  }
+
+				  if (currentEventType === 'action') {
+					toolCalls = [...toolCalls, { actionId: data.action_id, name: data.capability || 'device.action', args: data.arguments || {}, result: 'Waiting for device observation...', status: 'running' }];
+					updateMessage({
+					  ...(data.arguments?.user_takeover && data.arguments?.message ? { content: String(data.arguments.message) } : {}),
+					  toolCalls: [...toolCalls], status: data.policy?.decision === 'ASK_USER' ? 'pending_approval' : 'streaming',
+					});
+				  }
+
+				  if (currentEventType === 'progress') {
+					const targetIndex = data.action_id ? toolCalls.findIndex(call => call.actionId === data.action_id) : -1;
+					const updateIndex = targetIndex >= 0 ? targetIndex : lastRunningToolCallIndex(toolCalls);
+					if (updateIndex >= 0) {
+					  toolCalls = toolCalls.map((call, index) => index === updateIndex
+						? {
+							...call,
+							result: formatProgressResult(data),
+							progress: typeof data.progress === 'number' ? data.progress : call.progress,
+							progressStage: data.stage || call.progressStage,
+							progressMessage: data.message || call.progressMessage,
+							bytes: typeof data.bytes === 'number' ? data.bytes : call.bytes,
+							total: typeof data.total === 'number' ? data.total : call.total,
+							status: 'running'
+						  }
+						: call);
+					} else {
+					  toolCalls = [...toolCalls, { actionId: data.action_id, name: data.capability || 'device.progress', args: {}, result: formatProgressResult(data), progress: data.progress, progressStage: data.stage, progressMessage: data.message, bytes: data.bytes, total: data.total, status: 'running' }];
+					}
+					updateMessage({ toolCalls: [...toolCalls] });
+				  }
+
+				  if (currentEventType === 'observation') {
+					const targetIndex = data.action_id ? toolCalls.findIndex(call => call.actionId === data.action_id) : -1;
+					const updateIndex = targetIndex >= 0 ? targetIndex : toolCalls.length - 1;
+					toolCalls = toolCalls.map((call, index) => index === updateIndex
+					  ? { ...call, result: formatObservationResult(data), status: data.status === 'SUCCEEDED' ? 'completed' : 'error' }
+					  : call);
+					updateMessage({ toolCalls: [...toolCalls] });
+				  }
 
                   // 处理 recall_complete 事件 - 显示知识召回完成
                   if (currentEventType === 'recall_complete') {
@@ -1092,12 +1312,12 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
                       // 更新最后一个 toolCall 的结果
                       toolCalls = toolCalls.map((tc, idx) =>
                         idx === toolCalls.length - 1
-                          ? { ...tc, result: data.output || data.error || '(无输出)', status: data.success === false ? 'error' : 'completed' }
+                          ? { ...tc, result: formatToolPayload(data.output !== undefined ? data.output : data.error), status: data.success === false ? 'error' : 'completed' }
                           : tc
                       );
                     } else {
                       // 没有 pendingToolCall，说明是独立的 tool 事件，直接添加
-                      toolCalls = [...toolCalls, { name: toolName, args: toolArgs, result: data.output || data.error || '(无输出)', status: data.success === false ? 'error' : 'completed' }];
+                      toolCalls = [...toolCalls, { name: toolName, args: toolArgs, result: formatToolPayload(data.output !== undefined ? data.output : data.error), status: data.success === false ? 'error' : 'completed' }];
                     }
                     pendingToolCall = null;
                     updateMessage({ toolCalls: [...toolCalls] });
@@ -1123,6 +1343,7 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
                   }
 
                   if (currentEventType === 'done') {
+					streamCompleted = true;
                     streamTokenUsage = {
                       prompt_tokens: data.prompt_tokens,
                       completion_tokens: data.completion_tokens,
@@ -1134,27 +1355,17 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
                     const finalContent = stripImagePlanningMarkup(stripInternalControlTags(rawFinalContent));
                     finalAssistantContent = finalContent;
                     const { html, markdown, reportUrl, pptUrl } = extractHtmlFromMarkdown(finalContent);
-                    updateMessage({
-                      content: markdown || finalContent,
-                      htmlContent: html || undefined,
-                      reportUrl: reportUrl || undefined,
-                      pptUrl: pptUrl || undefined,
-                      status: 'completed',
-                      toolCalls: [...toolCalls]
-                    });
+					const waiting = data.finish_reason === 'waiting_approval' || data.finish_reason === 'waiting_user';
+					updateMessage({
+					  ...(!waiting || finalContent ? { content: markdown || finalContent } : {}),
+					  htmlContent: html || undefined, reportUrl: reportUrl || undefined, pptUrl: pptUrl || undefined,
+					  status: data.finish_reason === 'waiting_approval' ? 'pending_approval' : 'completed', toolCalls: [...toolCalls]
+					});
                   }
 
                   if (currentEventType === 'error') {
                     console.error('Stream error:', data.message || data.error);
-                    // 如果是用户主动取消，不显示后端的错误信息
-                    if (userInitiatedStopRef.current) {
-                      const cancelMsg = `\n\n已停止生成。\n`;
-                      accumulatedContent += cancelMsg;
-                    } else {
-                      const errorMsg = `\n\n执行错误: ${data.message || data.error || 'Unknown error'}\n`;
-                      accumulatedContent += errorMsg;
-                    }
-                    updateMessage({ content: accumulatedContent });
+					if (!streamErrorMessage) streamErrorMessage = data.message || data.error || 'Unknown error';
                   }
                 } catch (e) {
                   // 忽略解析错误
@@ -1170,10 +1381,49 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
                     console.log('[SSE] checkpoint_id:', checkpointIdRef.current);
                   }
 
-                  if (currentEventType === 'delta' && data.text) {
+				  if (currentEventType === 'delta' && data.text) {
                     accumulatedContent += data.text;
                     updateMessage({ content: accumulatedContent });
-                  }
+				  }
+
+				  if (currentEventType === 'action') {
+					toolCalls = [...toolCalls, { actionId: data.action_id, name: data.capability || 'device.action', args: data.arguments || {}, result: 'Waiting for device observation...', status: 'running' }];
+					updateMessage({
+					  ...(data.arguments?.user_takeover && data.arguments?.message ? { content: String(data.arguments.message) } : {}),
+					  toolCalls: [...toolCalls], status: data.policy?.decision === 'ASK_USER' ? 'pending_approval' : 'streaming',
+					});
+				  }
+
+				  if (currentEventType === 'progress') {
+					const targetIndex = data.action_id ? toolCalls.findIndex(call => call.actionId === data.action_id) : -1;
+					const updateIndex = targetIndex >= 0 ? targetIndex : lastRunningToolCallIndex(toolCalls);
+					if (updateIndex >= 0) {
+					  toolCalls = toolCalls.map((call, index) => index === updateIndex
+						? {
+							...call,
+							result: formatProgressResult(data),
+							progress: typeof data.progress === 'number' ? data.progress : call.progress,
+							progressStage: data.stage || call.progressStage,
+							progressMessage: data.message || call.progressMessage,
+							bytes: typeof data.bytes === 'number' ? data.bytes : call.bytes,
+							total: typeof data.total === 'number' ? data.total : call.total,
+							status: 'running'
+						  }
+						: call);
+					} else {
+					  toolCalls = [...toolCalls, { actionId: data.action_id, name: data.capability || 'device.progress', args: {}, result: formatProgressResult(data), progress: data.progress, progressStage: data.stage, progressMessage: data.message, bytes: data.bytes, total: data.total, status: 'running' }];
+					}
+					updateMessage({ toolCalls: [...toolCalls] });
+				  }
+
+				  if (currentEventType === 'observation') {
+					const targetIndex = data.action_id ? toolCalls.findIndex(call => call.actionId === data.action_id) : -1;
+					const updateIndex = targetIndex >= 0 ? targetIndex : toolCalls.length - 1;
+					toolCalls = toolCalls.map((call, index) => index === updateIndex
+					  ? { ...call, result: formatObservationResult(data), status: data.status === 'SUCCEEDED' ? 'completed' : 'error' }
+					  : call);
+					updateMessage({ toolCalls: [...toolCalls] });
+				  }
 
                   // 处理 recall_complete 事件
                   if (currentEventType === 'recall_complete') {
@@ -1195,11 +1445,11 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
                     if (pendingToolCall && toolCalls.length > 0) {
                       toolCalls = toolCalls.map((tc, idx) =>
                         idx === toolCalls.length - 1
-                          ? { ...tc, result: data.output || data.error || '(无输出)', status: data.success === false ? 'error' : 'completed' }
+                          ? { ...tc, result: formatToolPayload(data.output !== undefined ? data.output : data.error), status: data.success === false ? 'error' : 'completed' }
                           : tc
                       );
                     } else {
-                      toolCalls = [...toolCalls, { name: toolName, args: toolArgs, result: data.output || data.error || '(无输出)', status: data.success === false ? 'error' : 'completed' }];
+                      toolCalls = [...toolCalls, { name: toolName, args: toolArgs, result: formatToolPayload(data.output !== undefined ? data.output : data.error), status: data.success === false ? 'error' : 'completed' }];
                     }
                     pendingToolCall = null;
                     updateMessage({ toolCalls: [...toolCalls] });
@@ -1225,6 +1475,7 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
                   }
 
                   if (currentEventType === 'done') {
+					streamCompleted = true;
                     streamTokenUsage = {
                       prompt_tokens: data.prompt_tokens,
                       completion_tokens: data.completion_tokens,
@@ -1236,27 +1487,17 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
                     const finalContent = stripImagePlanningMarkup(stripInternalControlTags(rawFinalContent));
                     finalAssistantContent = finalContent;
                     const { html, markdown, reportUrl, pptUrl } = extractHtmlFromMarkdown(finalContent);
-                    updateMessage({
-                      content: markdown || finalContent,
-                      htmlContent: html || undefined,
-                      reportUrl: reportUrl || undefined,
-                      pptUrl: pptUrl || undefined,
-                      status: 'completed',
-                      toolCalls: [...toolCalls]
-                    });
+					const waiting = data.finish_reason === 'waiting_approval' || data.finish_reason === 'waiting_user';
+					updateMessage({
+					  ...(!waiting || finalContent ? { content: markdown || finalContent } : {}),
+					  htmlContent: html || undefined, reportUrl: reportUrl || undefined, pptUrl: pptUrl || undefined,
+					  status: data.finish_reason === 'waiting_approval' ? 'pending_approval' : 'completed', toolCalls: [...toolCalls]
+					});
                   }
 
                   if (currentEventType === 'error') {
                     console.error('Stream error:', data.message || data.error);
-                    // 如果是用户主动取消，不显示后端的错误信息
-                    if (userInitiatedStopRef.current) {
-                      const cancelMsg = `\n\n已停止生成。\n`;
-                      accumulatedContent += cancelMsg;
-                    } else {
-                      const errorMsg = `\n\n执行错误: ${data.message || data.error || 'Unknown error'}\n`;
-                      accumulatedContent += errorMsg;
-                    }
-                    updateMessage({ content: accumulatedContent });
+					if (!streamErrorMessage) streamErrorMessage = data.message || data.error || 'Unknown error';
                   }
                 } catch (e) {
                   // 忽略解析错误
@@ -1267,9 +1508,18 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
         } finally {
           reader.releaseLock();
         }
+		if (!streamCompleted && streamErrorMessage) {
+			const failure = userInitiatedStopRef.current
+				? t('chat.generationStopped')
+				: `${t('chat.executionError')}: ${streamErrorMessage}`;
+			accumulatedContent = accumulatedContent.trim()
+				? `${accumulatedContent.trim()}\n\n${failure}`
+				: failure;
+			updateMessage({ content: accumulatedContent, status: 'failed' });
+		}
 
-        // 保存消息到数据库
-        const rawCompletedContent = finalAssistantContent || accumulatedContent;
+		// 保存消息到数据库
+		const rawCompletedContent = finalAssistantContent || accumulatedContent;
         internalControlTagStripped ||= hasInternalControlTag(rawCompletedContent);
         invalidImagePlanningOutput ||= hasImagePlanningMarkup(rawCompletedContent);
         const completedContent = stripImagePlanningMarkup(stripInternalControlTags(rawCompletedContent));
@@ -1328,7 +1578,7 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
         }
       }
 
-      const rawAssistantMessage = data.content || data.output || "I'm sorry, I couldn't generate a response.";
+	  const rawAssistantMessage = data.content || data.output || "I'm sorry, I couldn't generate a response.";
       const nonStreamInternalTagStripped = hasInternalControlTag(rawAssistantMessage);
       const nonStreamInvalidImagePlanningOutput = hasImagePlanningMarkup(rawAssistantMessage);
       const assistantMessageRaw = stripImagePlanningMarkup(stripInternalControlTags(rawAssistantMessage));
@@ -1380,13 +1630,16 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
         return;
       }
       console.error("Runner Error:", error);
+	  const detail = String(error?.message || error || t('chat.unknownError')).split('\n')[0].slice(0, 500);
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: "Sorry, I encountered an error while processing your request. Please try again later.",
+		content: `${t('chat.executionError')}: ${detail}`,
         timestamp: new Date()
       };
-      setMessages(prev => [...prev, errorMessage]);
+	  setMessages(prev => activeAssistantMessageId
+		? prev.map(message => message.id === activeAssistantMessageId ? { ...message, content: errorMessage.content, status: 'failed' } : message)
+		: [...prev, errorMessage]);
     } finally {
       setIsLoading(false);
       abortControllerRef.current = null;
@@ -1762,7 +2015,7 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
                       const toolKey = `${msg.id}-${idx}`;
                       const isCollapsed = collapsedTools[toolKey];
                       const isRunning = tool.status === 'running' || tool.result === '执行中...';
-                      const isError = tool.result?.startsWith('错误:') || tool.status === 'error';
+                      const isError = isToolResultError(tool.result, tool.status);
                       return (
                         <div key={idx} className="bg-slate-50 border border-slate-100 rounded-xl overflow-hidden">
                           <div
@@ -1802,6 +2055,29 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
                                   {JSON.stringify(tool.args, null, 2)}
                                 </code>
                               </div>
+                              {typeof tool.progress === 'number' && (
+                                <div className="space-y-1.5 pt-2 border-t border-slate-100">
+                                  <div className="flex items-center justify-between text-[9px] font-bold uppercase text-slate-400">
+                                    <span>{tool.progressStage || 'progress'}</span>
+                                    <span>{Math.max(0, Math.min(100, tool.progress))}%</span>
+                                  </div>
+                                  <div className="h-1.5 overflow-hidden rounded-full bg-white ring-1 ring-slate-100">
+                                    <div
+                                      className={cn(
+                                        'h-full rounded-full transition-all duration-500',
+                                        isError ? 'bg-red-400' : isRunning ? 'bg-amber-400' : 'bg-green-500'
+                                      )}
+                                      style={{ width: `${Math.max(3, Math.min(100, tool.progress))}%` }}
+                                    />
+                                  </div>
+                                  {(tool.progressMessage || tool.bytes) && (
+                                    <div className="text-[10px] text-slate-500">
+                                      {tool.progressMessage || ''}
+                                      {tool.bytes ? `${tool.progressMessage ? ' · ' : ''}${formatBytes(tool.bytes)}${tool.total ? ` / ${formatBytes(tool.total)}` : ''}` : ''}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
                               {tool.result && (
                                 <div className="space-y-1 pt-2 border-t border-slate-100">
                                   <div className="flex items-center gap-1 text-[9px] text-slate-400 uppercase font-medium">
@@ -1815,7 +2091,7 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
                                     {t('chat.output')}
                                   </div>
                                   <code className="block text-[10px] text-slate-600 bg-white px-2 py-1.5 rounded border border-slate-100 font-mono max-h-32 overflow-auto">
-                                    {typeof tool.result === 'string' ? tool.result : JSON.stringify(tool.result, null, 2)}
+                                    {formatToolPayload(tool.result)}
                                   </code>
                                 </div>
                               )}
@@ -1955,7 +2231,7 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
                         "p-1 rounded-md transition-colors",
                         voice.isSpeaking ? "text-emerald-600 bg-emerald-50" : "text-slate-400 hover:text-slate-700 hover:bg-slate-100"
                       )}
-                      title={voice.isSpeaking ? '停止朗读' : '朗读回复'}
+					  title={voice.isSpeaking ? t('voiceCall.stopReading') : t('voiceCall.readReply')}
                     >
                       <Volume2 size={12} />
                     </button>
@@ -2060,8 +2336,7 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
               onStopSpeaking={voice.stopSpeaking}
               onEndCall={() => {
                 voice.setConversationMode(false);
-                voice.stopListening();
-                voice.stopSpeaking();
+				voice.stopAll();
               }}
               onOpenSettings={() => setIsVoiceSettingsOpen(true)}
               onUploadAvatar={() => avatarUploadRef.current?.click()}
@@ -2077,18 +2352,21 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
               voice.voiceError ? "bg-red-50 text-red-600" : voice.isListening ? "bg-rose-50 text-rose-600" : "bg-emerald-50 text-emerald-700"
             )}>
               {voice.isListening ? <Mic size={14} className="animate-pulse" /> : <Volume2 size={14} />}
-              <span>{voice.voiceError || (voice.isListening ? '正在聆听，请开始说话…' : '正在朗读 Agent 回复…')}</span>
+			  <span>{voice.voiceError || (voice.isListening ? t('voiceCall.listeningBanner') : t('voiceCall.speakingBanner'))}</span>
               <button
                 type="button"
-                onClick={voice.isListening ? voice.stopListening : voice.stopSpeaking}
+				onClick={() => {
+					voice.setConversationMode(false);
+					voice.stopAll();
+				}}
                 className="ml-auto font-bold hover:opacity-70"
               >
-                停止
+				{t('voiceCall.stop')}
               </button>
             </div>
           )}
           <AnimatePresence>
-            {files.length > 0 && (
+            {(files.length > 0 || localFileRoots.length > 0) && (
               <motion.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: 'auto' }}
@@ -2107,6 +2385,20 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
                     </button>
                   </div>
                 ))}
+				{localFileRoots.map(root => (
+				  <div key={root} className="group relative flex items-center gap-2 p-2 bg-emerald-50 rounded-lg border border-emerald-200">
+					<FolderSearch size={14} className="text-emerald-600" />
+					<span className="text-xs text-emerald-800 truncate max-w-[240px]" title={root}>{root}</span>
+					<button
+					  type="button"
+					  onClick={() => setLocalFileRoots(current => current.filter(item => item !== root))}
+					  className="p-1 hover:bg-emerald-100 rounded-full text-emerald-500 hover:text-red-500 transition-colors"
+					  title={t('chat.localFolderRemove')}
+					>
+					  <XCircle size={12} />
+					</button>
+				  </div>
+				))}
               </motion.div>
             )}
           </AnimatePresence>
@@ -2123,8 +2415,8 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
                   >
                     <div className="flex items-start justify-between mb-4">
                       <div>
-                        <h3 className="text-sm font-bold text-slate-900">语音风格</h3>
-                        <p className="text-[11px] text-slate-400 mt-0.5">优先选择 Natural、Neural 或 Premium 音色</p>
+						<h3 className="text-sm font-bold text-slate-900">{t('voiceCall.voiceStyle')}</h3>
+						<p className="text-[11px] text-slate-400 mt-0.5">{t('voiceCall.voiceStyleHint')}</p>
                       </div>
                       <button type="button" onClick={() => setIsVoiceSettingsOpen(false)} className="p-1 text-slate-400 hover:text-slate-700">
                         <XCircle size={16} />
@@ -2132,6 +2424,20 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
                     </div>
 
                     <div className="space-y-4">
+					  <label className="block space-y-1.5">
+						<span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{t('voiceCall.languageLabel')}</span>
+						<select
+						  value={voiceLanguage}
+						  onChange={event => setVoiceLanguage(event.target.value)}
+						  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 outline-none focus:border-emerald-400"
+						>
+						  <option value="en-US">English (United States)</option>
+						  <option value="en-GB">English (United Kingdom)</option>
+						  <option value="zh-CN">中文（普通话）</option>
+						  <option value="zh-TW">中文（台灣）</option>
+						  <option value="ja-JP">日本語</option>
+						</select>
+					  </label>
                       <div className="space-y-1.5">
                         <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{t('voiceCall.avatarLabel')}</span>
                         <div className="grid grid-cols-4 gap-2">
@@ -2196,13 +2502,13 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
                       </div>
 
                       <label className="block space-y-1.5">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">音色</span>
+						<span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{t('voiceCall.voiceLabel')}</span>
                         <select
                           value={voice.selectedVoiceURI}
                           onChange={event => voice.setSelectedVoiceURI(event.target.value)}
                           className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 outline-none focus:border-emerald-400"
                         >
-                          {voice.voices.length === 0 && <option value="">系统默认音色</option>}
+						  {voice.voices.length === 0 && <option value="">{t('voiceCall.systemDefaultVoice')}</option>}
                           {voice.voices.map(item => {
                             const highQuality = /natural|neural|premium|enhanced|高质量/i.test(item.name);
                             return (
@@ -2216,7 +2522,7 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
 
                       <label className="block space-y-1.5">
                         <span className="flex justify-between text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                          <span>语速</span><span>{voice.speechRate.toFixed(2)}x</span>
+						  <span>{t('voiceCall.speed')}</span><span>{voice.speechRate.toFixed(2)}x</span>
                         </span>
                         <input
                           type="range"
@@ -2231,7 +2537,7 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
 
                       <label className="block space-y-1.5">
                         <span className="flex justify-between text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                          <span>音调</span><span>{voice.speechPitch.toFixed(2)}</span>
+						  <span>{t('voiceCall.pitch')}</span><span>{voice.speechPitch.toFixed(2)}</span>
                         </span>
                         <input
                           type="range"
@@ -2246,7 +2552,7 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
 
                       <label className="block space-y-1.5">
                         <span className="flex justify-between text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                          <span>停顿后发送</span><span>{(voice.silenceTimeoutMs / 1000).toFixed(1)} 秒</span>
+						  <span>{t('voiceCall.silenceDelay')}</span><span>{t('voiceCall.seconds', { value: (voice.silenceTimeoutMs / 1000).toFixed(1) })}</span>
                         </span>
                         <input
                           type="range"
@@ -2258,17 +2564,17 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
                           className="w-full accent-emerald-500"
                         />
                         <span className="block text-[10px] leading-relaxed text-slate-400">
-                          连续语音中，停顿超过该时长才会发送。说话较慢时可调长。
+						  {t('voiceCall.silenceHint')}
                         </span>
                       </label>
 
                       <button
                         type="button"
-                        onClick={() => voice.isSpeaking ? voice.stopSpeaking() : voice.speak('你好，我是你的智能助手。很高兴和你进行语音交流。')}
+						onClick={() => voice.isSpeaking ? voice.stopSpeaking() : voice.speak(t('voiceCall.previewText'))}
                         className="w-full flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-600 transition-colors"
                       >
                         <Volume2 size={14} />
-                        {voice.isSpeaking ? '停止试听' : '试听当前音色'}
+						{voice.isSpeaking ? t('voiceCall.stopPreview') : t('voiceCall.preview')}
                       </button>
                     </div>
                   </motion.div>
@@ -2297,7 +2603,7 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
                     type="button"
                     onClick={() => {
                       if (!voice.supported) {
-                        toast.error('当前浏览器不支持语音识别，请使用最新版 Chrome、Edge 或 Safari');
+						toast.error(t('voiceCall.unsupportedRecognition'));
                         return;
                       }
                       if (voice.isListening) voice.stopListening();
@@ -2312,7 +2618,7 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
                           ? "hover:bg-slate-50 text-slate-600"
                           : "text-slate-300 cursor-not-allowed"
                     )}
-                    title={voice.isListening ? '停止语音输入' : '语音输入'}
+					title={voice.isListening ? t('voiceCall.inputStop') : t('voiceCall.inputStart')}
                   >
                     {voice.isListening && <span className="absolute inset-0 rounded-full bg-rose-400 animate-ping opacity-30" />}
                     <Mic size={16} className="relative" />
@@ -2329,13 +2635,26 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
                     <Paperclip size={16} />
                   </button>
 
+				  <button
+					type="button"
+					onClick={() => void authorizeLocalFolder()}
+					disabled={!activeAgent || agents.length === 0 || !desktopBridgeAvailable}
+					className={cn(
+					  "p-1.5 rounded-full transition-colors shrink-0",
+					  localFileRoots.length > 0 ? "bg-emerald-50 text-emerald-600" : activeAgent && agents.length > 0 && desktopBridgeAvailable ? "hover:bg-slate-50 text-slate-600" : "text-slate-300 cursor-not-allowed"
+					)}
+					title={desktopBridgeAvailable ? t('chat.localFolderAuthorize') : t('chat.localFolderRemoteUnavailable')}
+				  >
+					<FolderSearch size={16} />
+				  </button>
+
                   <div className="h-4 w-px bg-slate-100 shrink-0" />
 
                   <button
                     type="button"
                     onClick={() => {
                       if (!voice.synthesisSupported) {
-                        toast.error('当前浏览器不支持语音朗读');
+						toast.error(t('voiceCall.unsupportedSynthesis'));
                         return;
                       }
                       if (voice.isSpeaking) voice.stopSpeaking();
@@ -2345,7 +2664,7 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
                       "p-1.5 rounded-full transition-colors shrink-0",
                       voice.autoSpeak ? "bg-emerald-50 text-emerald-600" : "text-slate-500 hover:bg-slate-50"
                     )}
-                    title={voice.autoSpeak ? '关闭自动朗读' : '开启自动朗读'}
+					title={voice.autoSpeak ? t('voiceCall.autoReadOff') : t('voiceCall.autoReadOn')}
                   >
                     <Volume2 size={16} />
                   </button>
@@ -2354,7 +2673,7 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
                     type="button"
                     onClick={() => {
                       if (!voice.synthesisSupported) {
-                        toast.error('当前浏览器不支持语音朗读');
+						toast.error(t('voiceCall.unsupportedSynthesis'));
                         return;
                       }
                       setIsVoiceSettingsOpen(current => !current);
@@ -2363,7 +2682,7 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
                       "p-1.5 rounded-full transition-colors shrink-0",
                       isVoiceSettingsOpen ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-50"
                     )}
-                    title="选择音色和说话风格"
+					title={t('voiceCall.chooseStyle')}
                   >
                     <Settings size={15} />
                   </button>
@@ -2388,10 +2707,10 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
                         ? "bg-rose-50 text-rose-600 ring-1 ring-rose-200"
                         : "text-slate-500 hover:bg-slate-50 disabled:text-slate-300 disabled:cursor-not-allowed"
                     )}
-                    title="自动发送语音，并在 Agent 朗读后继续聆听"
+					title={t('voiceCall.continuousHint')}
                   >
                     <Podcast size={12} />
-                    <span className="hidden sm:inline">连续语音</span>
+					<span className="hidden sm:inline">{t('voiceCall.continuous')}</span>
                   </button>
 
                   <button

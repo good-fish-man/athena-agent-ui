@@ -158,8 +158,8 @@ export function AgentManager({ onViewChange, onPlayAgent, onEditAgent }: AgentMa
       endpoint: cfg.endpoint || '-',
       models: cfg.models || {},
       systemPrompt: cfg.system_prompt || '-',
-      toolsCount: cfg.tools?.length || 0,
-      tools: cfg.tools?.map((t: any) => t.name).join(', ') || '-',
+      capabilitiesCount: cfg.capabilities?.length || 0,
+      capabilities: cfg.capabilities?.map((capability: any) => capability.id).join(', ') || '-',
       mcpsCount: cfg.mcps?.length || 0,
       mcps: cfg.mcps?.map((m: any) => m.name).join(', ') || '-',
       a2aCount: cfg.a2a?.length || 0,
@@ -714,14 +714,14 @@ export function AgentManager({ onViewChange, onPlayAgent, onEditAgent }: AgentMa
                           </div>
                         )}
 
-                        {/* Tools/MCP/A2A/Skills Summary */}
+                        {/* Capabilities/MCP/A2A/Skills Summary */}
                         <div className="grid grid-cols-2 gap-3">
-                          {(cfgJson.toolsCount > 0 || cfgJson.mcpsCount > 0 || cfgJson.a2aCount > 0) && (
+                          {(cfgJson.capabilitiesCount > 0 || cfgJson.mcpsCount > 0 || cfgJson.a2aCount > 0) && (
                             <>
-                              {cfgJson.toolsCount > 0 && (
+                              {cfgJson.capabilitiesCount > 0 && (
                                 <div className="p-3 bg-brand-50 rounded-xl">
-                                  <label className="text-[9px] font-bold text-brand-600 uppercase">{t('agents.tools')} ({cfgJson.toolsCount})</label>
-                                  <p className="text-xs text-slate-700 mt-1">{cfgJson.tools}</p>
+                                  <label className="text-[9px] font-bold text-brand-600 uppercase">Capabilities ({cfgJson.capabilitiesCount})</label>
+                                  <p className="text-xs font-mono text-slate-700 mt-1">{cfgJson.capabilities}</p>
                                 </div>
                               )}
                               {cfgJson.mcpsCount > 0 && (

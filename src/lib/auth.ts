@@ -1,4 +1,4 @@
-import { RUNTIME_CLIENT_DEFAULT_ORIGIN, RUNTIME_CLIENT_WAILS_ORIGIN } from './runtimeConstants';
+import { resolveRuntimeClientOrigin } from './runtimeConstants';
 
 export interface AuthUser {
   ulid: string;
@@ -34,12 +34,7 @@ export const authStore = {
 
 let installed = false;
 
-const runtimeOrigin = (() => {
-	const configured = window.location.hostname === 'wails.localhost'
-    ? RUNTIME_CLIENT_WAILS_ORIGIN
-    : (import.meta.env.VITE_AGENT_RUNTIME_CLIENT_URL || import.meta.env.VITE_AGENT_FRAME_API_URL || RUNTIME_CLIENT_DEFAULT_ORIGIN);
-  return new URL(configured, window.location.href).origin;
-})();
+const runtimeOrigin = new URL(resolveRuntimeClientOrigin(), window.location.href).origin;
 
 // Existing API modules use fetch directly, so install one narrow interceptor for runtime-client requests.
 export function installAuthorizedFetch() {

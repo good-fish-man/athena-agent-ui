@@ -16,7 +16,8 @@ import {
   LogOut,
   Camera,
   WandSparkles,
-  Loader2
+  Loader2,
+  KeyRound
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { View } from '../types';
@@ -103,6 +104,7 @@ export function Sidebar({ activeView, onViewChange, user, onUserChange, onLogout
         { id: 'models', label: t('sidebar.models'), description: t('sidebar.modelsDesc'), icon: Cpu },
         { id: 'skills', label: t('sidebar.skills'), description: t('sidebar.skillsDesc'), icon: Zap },
         { id: 'knowledge', label: t('sidebar.knowledge'), description: t('sidebar.knowledgeDesc'), icon: Database },
+        { id: 'website-accounts', label: t('sidebar.websiteAccounts'), description: t('sidebar.websiteAccountsDesc'), icon: KeyRound },
       ],
     },
   ];

@@ -52,6 +52,35 @@ function storedNumber(key: string, fallback: number) {
   return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
+function localizedVoiceError(language: string | undefined, english: string, chinese: string) {
+	return (language || '').toLowerCase().startsWith('zh') ? chinese : english;
+}
+
+function microphonePermissionError(language?: string) {
+  const isDesktop = typeof window !== 'undefined' && window.location.hostname === 'wails.localhost';
+  const isChinese = (language || navigator.language || '').toLowerCase().startsWith('zh');
+  if (isDesktop) {
+		const navigatorWithPlatform = navigator as Navigator & { userAgentData?: { platform?: string } };
+		const platform = `${navigatorWithPlatform.userAgentData?.platform || ''} ${navigator.platform || ''} ${navigator.userAgent || ''}`.toLowerCase();
+		if (platform.includes('win')) {
+			return isChinese
+				? '麦克风权限被拒绝，请在 Windows 设置 > 隐私和安全性 > 麦克风中开启“麦克风访问”和“允许桌面应用访问麦克风”，然后重新打开 Athena。'
+				: 'Microphone access was denied. In Windows Settings > Privacy & security > Microphone, enable both microphone access and desktop app access, then reopen Athena.';
+		}
+		if (platform.includes('linux')) {
+			return isChinese
+				? '麦克风权限被拒绝，请在系统隐私或声音设置中允许 Athena 使用麦克风，然后重新打开应用。'
+				: 'Microphone access was denied. Allow Athena in your system privacy or sound settings, then reopen the app.';
+		}
+    return isChinese
+      ? '麦克风权限被拒绝，请在系统设置 > 隐私与安全性 > 麦克风中允许 Athena，然后重新打开应用。'
+      : 'Microphone access was denied. Allow Athena in System Settings > Privacy & Security > Microphone, then reopen the app.';
+  }
+  return isChinese
+    ? '麦克风权限被拒绝，请在浏览器设置中允许访问。'
+    : 'Microphone access was denied. Allow it in your browser settings.';
+}
+
 function voiceQualityScore(voice: SpeechSynthesisVoice, language: string) {
   const name = voice.name.toLowerCase();
   let score = voice.lang.toLowerCase().startsWith(language.split('-')[0].toLowerCase()) ? 100 : 0;
@@ -139,7 +168,8 @@ export function useVoiceConversation({ onTranscript, onFinalTranscript, language
       available.sort((a, b) => voiceQualityScore(b, locale) - voiceQualityScore(a, locale) || a.name.localeCompare(b.name));
       setVoices(available);
       setSelectedVoiceURI(current => {
-        if (current && available.some(voice => voice.voiceURI === current)) return current;
+		const currentVoice = available.find(voice => voice.voiceURI === current);
+		if (currentVoice && currentVoice.lang.toLowerCase().startsWith(locale.split('-')[0].toLowerCase())) return current;
         return available[0]?.voiceURI || '';
       });
     };
@@ -230,9 +260,13 @@ export function useVoiceConversation({ onTranscript, onFinalTranscript, language
     recognition.onerror = (event: any) => {
       recognitionErrorRef.current = event.error || 'unknown';
       if (event.error === 'aborted' || event.error === 'no-speech') return;
-      const message = event.error === 'not-allowed'
-        ? '麦克风权限被拒绝，请在浏览器设置中允许访问。'
-        : `语音识别失败：${event.error || '未知错误'}`;
+		if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+			intentionalStopRef.current = true;
+		}
+		const permissionDenied = event.error === 'not-allowed' || event.error === 'service-not-allowed';
+      const message = permissionDenied
+		? microphonePermissionError(language)
+		: localizedVoiceError(language, `Speech recognition failed: ${event.error || 'unknown error'}`, `语音识别失败：${event.error || '未知错误'}`);
       setVoiceError(message);
     };
     recognition.onend = () => {
@@ -257,7 +291,7 @@ export function useVoiceConversation({ onTranscript, onFinalTranscript, language
     } catch {
       recognitionRef.current = null;
       setIsListening(false);
-      setVoiceError('无法启动语音识别，请稍后重试。');
+		setVoiceError(localizedVoiceError(language, 'Unable to start speech recognition. Please try again.', '无法启动语音识别，请稍后重试。'));
     }
   }, [isListening, language, silenceTimeoutMs, stopSpeaking]);
 
@@ -265,7 +299,7 @@ export function useVoiceConversation({ onTranscript, onFinalTranscript, language
 
   const speak = React.useCallback((text: string, resumeConversation = false) => {
     if (!synthesisSupported) {
-      setVoiceError('当前浏览器不支持语音朗读。');
+		setVoiceError(localizedVoiceError(language, 'Speech playback is unavailable in this browser.', '当前浏览器不支持语音朗读。'));
       return;
     }
     const chunks = speechChunks(text);
@@ -301,12 +335,21 @@ export function useVoiceConversation({ onTranscript, onFinalTranscript, language
       utterance.onerror = () => {
         setIsSpeaking(false);
         setSpeakingText('');
-        setVoiceError('语音朗读失败。');
+		setVoiceError(localizedVoiceError(language, 'Speech playback failed.', '语音朗读失败。'));
       };
       window.speechSynthesis.speak(utterance);
     };
     playNext();
   }, [language, selectedVoiceURI, speechPitch, speechRate, stopListening, synthesisSupported, voices]);
+
+	const stopAll = React.useCallback(() => {
+		stopListening();
+		stopSpeaking();
+		recognitionErrorRef.current = '';
+		finalTranscriptRef.current = '';
+		currentTranscriptRef.current = '';
+		setVoiceError('');
+	}, [stopListening, stopSpeaking]);
 
   React.useEffect(() => () => {
     intentionalStopRef.current = true;
@@ -344,5 +387,6 @@ export function useVoiceConversation({ onTranscript, onFinalTranscript, language
     stopListening,
     speak,
     stopSpeaking,
+		stopAll,
   };
 }

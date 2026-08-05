@@ -5,6 +5,7 @@ import {defineConfig, loadEnv} from 'vite';
 
 export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
+  const defaultProxyTarget = 'http://localhost:8090';
   return {
     plugins: [react(), tailwindcss()],
     define: {
@@ -21,7 +22,7 @@ export default defineConfig(({mode}) => {
       hmr: process.env.DISABLE_HMR !== 'true',
       proxy: {
         '/api': {
-          target: env.VITE_AGENT_RUNTIME_CLIENT_URL || env.VITE_AGENT_FRAME_API_URL || 'http://localhost:8090',
+          target: env.VITE_AGENT_RUNTIME_CLIENT_URL || env.VITE_AGENT_FRAME_API_URL || defaultProxyTarget,
           changeOrigin: true,
         },
       },

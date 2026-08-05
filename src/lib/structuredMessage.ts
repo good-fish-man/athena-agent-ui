@@ -18,6 +18,7 @@ export type ClarificationMessage = {
 export type BrowserAuthenticationMessage = {
   type: 'browser_authentication';
   status: 'authentication_required';
+  request_id?: string;
   session_id: string;
   url: string;
   domain: string;

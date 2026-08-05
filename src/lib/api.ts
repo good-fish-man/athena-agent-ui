@@ -1,15 +1,12 @@
 import type { Agent } from '../types';
+import i18n from '../i18n';
 import {
   MODEL_RUNTIME_MODE,
-  RUNTIME_CLIENT_DEFAULT_ORIGIN,
-  RUNTIME_CLIENT_WAILS_ORIGIN,
+  resolveRuntimeClientOrigin,
 } from './runtimeConstants';
 import type { ModelRuntimeMode } from './runtimeConstants';
 
-const isWails = window.location.hostname === 'wails.localhost';
-export const RUNTIME_CLIENT_ORIGIN = isWails
-  ? RUNTIME_CLIENT_WAILS_ORIGIN
-  : (import.meta.env.VITE_AGENT_RUNTIME_CLIENT_URL || import.meta.env.VITE_AGENT_FRAME_API_URL || RUNTIME_CLIENT_DEFAULT_ORIGIN);
+export const RUNTIME_CLIENT_ORIGIN = resolveRuntimeClientOrigin();
 const PUBLIC_PREFIX = import.meta.env.VITE_AGENT_RUNTIME_PUBLIC_PREFIX || '/api/agent-runtime-client/v1';
 const RUNTIME_PREFIX = import.meta.env.VITE_AGENT_RUNTIME_API_PREFIX || '/v1';
 
@@ -54,6 +51,73 @@ export interface ApiResponse<T = any> {
   message: string;
   data: T;
 }
+
+export interface RuntimeCapability {
+  id: string;
+  description: string;
+  input?: Record<string, string>;
+  output?: string;
+  read_only: boolean;
+  risk: 'low' | 'medium' | 'high' | string;
+  status: 'available' | 'unavailable';
+  provider?: string;
+  reason?: string;
+}
+
+export type RuntimeCapabilityConfig = {
+  id: string;
+  config?: Record<string, unknown>;
+};
+
+export const capabilityApi = {
+  async list(): Promise<RuntimeCapability[]> {
+    return readJson<RuntimeCapability[]>(await apiFetch(`${RUNTIME_API_BASE}/capabilities`));
+  },
+};
+
+export interface ControlDevice {
+  id: string;
+  user_id?: string;
+  name: string;
+  platform: string;
+  architecture: string;
+  capabilities: string[];
+  online: boolean;
+  connected_at?: string;
+  last_seen_at?: string;
+}
+
+export interface ControlTask {
+  task_id: string;
+  conversation_id?: string;
+  user_id: string;
+  device_id: string;
+  status: string;
+  sequence: number;
+  active_sessions?: Record<string, string>;
+  actions?: unknown[];
+  observations?: unknown[];
+  created_at: string;
+  updated_at: string;
+}
+
+export const controlApi = {
+  async devices(): Promise<ControlDevice[]> {
+    const result = await readJson<{ devices: ControlDevice[] }>(await apiFetch(`${RUNTIME_API_BASE}/control/devices`));
+    return result.devices || [];
+  },
+  async bindDevice(deviceId: string): Promise<void> {
+    await readJson(await apiFetch(`${RUNTIME_API_BASE}/control/devices/${encodeURIComponent(deviceId)}/bind`, { method: 'POST' }));
+  },
+  async tasks(conversationId?: string): Promise<ControlTask[]> {
+    const query = conversationId ? `?conversation_id=${encodeURIComponent(conversationId)}` : '';
+    const result = await readJson<{ tasks: ControlTask[] }>(await apiFetch(`${RUNTIME_API_BASE}/control/tasks${query}`));
+    return result.tasks || [];
+  },
+  async task(taskId: string): Promise<ControlTask> {
+    return readJson<ControlTask>(await apiFetch(`${RUNTIME_API_BASE}/control/tasks/${encodeURIComponent(taskId)}`));
+  },
+};
 
 async function readJson<T = any>(res: Response): Promise<T> {
   if (res.status === 204) {
@@ -696,6 +760,66 @@ export const modelKeyApi = {
 	},
 };
 
+export interface SiteCredential {
+  ulid: string;
+  created_at: number;
+  updated_at: number;
+  name: string;
+  domain: string;
+  login_url: string;
+  username_masked: string;
+  enabled: boolean;
+}
+
+export interface BrowserLoginResult {
+  session_id: string;
+  url: string;
+  domain: string;
+  status: 'verification_required';
+  message: string;
+}
+
+export const siteCredentialApi = {
+  async findAll(domain?: string): Promise<SiteCredential[]> {
+    const query = domain ? `?domain=${encodeURIComponent(domain)}` : '';
+    return readJson<SiteCredential[]>(await apiFetch(`${API_BASE}/site-credential/all${query}`));
+  },
+  async create(data: { name: string; login_url: string; username: string; password: string }): Promise<SiteCredential> {
+    return readJson<SiteCredential>(await apiFetch(`${API_BASE}/site-credential`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
+    }));
+  },
+  async update(ulid: string, data: { name?: string; login_url?: string; username?: string; password?: string; enabled?: boolean }): Promise<SiteCredential> {
+    return readJson<SiteCredential>(await apiFetch(`${API_BASE}/site-credential/${ulid}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
+    }));
+  },
+  async delete(ulid: string): Promise<void> {
+    await readJson(await apiFetch(`${API_BASE}/site-credential/${ulid}`, { method: 'DELETE' }));
+  },
+  async login(ulid: string, sessionId?: string): Promise<BrowserLoginResult> {
+    return readJson<BrowserLoginResult>(await apiFetch(`${API_BASE}/site-credential/${ulid}/login`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ session_id: sessionId || '' }),
+    }));
+  },
+};
+
+export interface ScheduledTaskDTO {
+  ulid: string; agent_id: string; session_id: string; name: string;
+  task_type: 'ticket' | 'product' | 'appointment' | 'monitor';
+  cron: string; timezone: string; prompt: string; criteria_json: string;
+  action_mode: 'confirm_before_commit'; status: 'active' | 'paused';
+  last_run_at: number; last_status: string; last_result: string; last_error: string; execution_count: number;
+}
+
+export const scheduledTaskApi = {
+  async findAll(): Promise<ScheduledTaskDTO[]> { return readJson<ScheduledTaskDTO[]>(await apiFetch(`${API_BASE}/scheduled-task/all`)); },
+  async setStatus(ulid: string, status: 'active' | 'paused'): Promise<void> { await readJson(await apiFetch(`${API_BASE}/scheduled-task/${ulid}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) })); },
+  async delete(ulid: string): Promise<void> { await readJson(await apiFetch(`${API_BASE}/scheduled-task/${ulid}`, { method: 'DELETE' })); },
+  async approvals(): Promise<ChatApproval[]> { return readJson<ChatApproval[]>(await apiFetch(`${API_BASE}/scheduled-task/approvals`)); },
+  async decideApproval(ulid: string, approved: boolean, reason = ''): Promise<{ interactive_completion_required: boolean }> { return readJson(await apiFetch(`${API_BASE}/scheduled-task/approvals/${ulid}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ approved, reason }) })); },
+};
+
 export interface KnowledgeBase {
   ulid: string;
   created_at: number;
@@ -965,7 +1089,7 @@ export interface Skill {
   updated_by: string;
   name: string;
   description: string;
-  skill_type: 'mcp' | 'tool' | 'a2a' | 'skill';
+  skill_type: 'mcp' | 'a2a' | 'skill';
   version: string;
   path: string;
   enabled: boolean;
@@ -983,7 +1107,7 @@ export const skillApi = {
   async create(data: {
     name: string;
     description?: string;
-    skillType: 'mcp' | 'tool' | 'a2a' | 'skill';
+    skillType: 'mcp' | 'a2a' | 'skill';
     version?: string;
     path: string;
     enabled?: boolean;
@@ -1004,7 +1128,7 @@ export const skillApi = {
   async update(ulid: string, data: {
     name?: string;
     description?: string;
-    skillType?: 'mcp' | 'tool' | 'a2a';
+    skillType?: 'mcp' | 'a2a' | 'skill';
     version?: string;
     path?: string;
     enabled?: boolean;
@@ -1288,7 +1412,10 @@ type RunAgentParams = {
   input: string;
   files?: any[];
   history?: RunHistoryMessage[];
-  is_test?: boolean;
+	context?: Record<string, unknown>;
+	is_test?: boolean;
+	capabilities?: RuntimeCapabilityConfig[];
+	request_id?: string;
   signal?: AbortSignal;
 };
 
@@ -1321,11 +1448,14 @@ function normalizeRuntimeConfig(data: RunAgentParams) {
     user_id: data.user_id,
     agent_id: data.agent_id,
     is_test: Boolean(data.is_test),
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Local',
+		locale: i18n.resolvedLanguage || i18n.language || 'en',
+		...(data.context || {}),
   };
 
   return {
     prompt: data.input,
-    request_id: makeId(),
+		request_id: data.request_id || makeId(),
     context,
     messages: (data.history || [])
       .filter(m => m && typeof m.content === 'string' && m.content.trim() !== '')
@@ -1336,6 +1466,7 @@ function normalizeRuntimeConfig(data: RunAgentParams) {
       type: file.type || '',
       virtual_path: file.virtual_path || file.url || file.name,
     })),
+		capabilities: data.capabilities || [],
     options: {
       stream: true,
     },
@@ -1540,6 +1671,7 @@ export const chatApi = {
   },
 
   async approveApproval(ulid: string, approvedBy: string, reason?: string): Promise<void> {
+	if (!ulid.startsWith('local-')) { await scheduledTaskApi.decideApproval(ulid, true, reason); return; }
     setLocalApprovals(getLocalApprovals().map(item =>
       item.ulid === ulid
         ? { ...item, status: 'approved', approved_by: approvedBy, approved_at: Date.now(), reason: reason || '' }
@@ -1548,6 +1680,7 @@ export const chatApi = {
   },
 
   async rejectApproval(ulid: string, approvedBy: string, reason?: string): Promise<void> {
+	if (!ulid.startsWith('local-')) { await scheduledTaskApi.decideApproval(ulid, false, reason); return; }
     setLocalApprovals(getLocalApprovals().map(item =>
       item.ulid === ulid
         ? { ...item, status: 'rejected', approved_by: approvedBy, approved_at: Date.now(), reason: reason || '' }
@@ -1568,7 +1701,11 @@ export const chatApi = {
   },
 
   async getPendingApprovals(): Promise<ChatApproval[]> {
-    return getLocalApprovals().filter(item => item.status === 'pending');
+	const local = getLocalApprovals().filter(item => item.status === 'pending');
+	try {
+		const remote = (await scheduledTaskApi.approvals()).filter(item => item.status === 'pending');
+		return [...remote, ...local.filter(item => !remote.some(remoteItem => remoteItem.ulid === item.ulid))];
+	} catch { return local; }
   },
 
   async getApprovalsByUserId(userId: string): Promise<ChatApproval[]> {

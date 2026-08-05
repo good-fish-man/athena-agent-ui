@@ -1,23 +1,25 @@
 import React from 'react';
-import { Inbox as InboxIcon, CheckCircle2, XCircle, Clock, ShieldAlert, UserCheck, RefreshCw } from 'lucide-react';
+import { Inbox as InboxIcon, CheckCircle2, XCircle, Clock, ShieldAlert, UserCheck, RefreshCw, Pause, Play, Trash2, Ticket, ShoppingBag, Stethoscope } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '../lib/utils';
 import { ChatApproval } from '../types';
-import { chatApi } from '../lib/api';
+import { chatApi, scheduledTaskApi, type ScheduledTaskDTO } from '../lib/api';
 import { authStore } from '../lib/auth';
+import type { View } from '../types';
 
-export function Inbox() {
+export function Inbox({ onViewChange }: { onViewChange?: (view: View) => void }) {
 	const currentUserId = authStore.userID();
   const { t } = useTranslation();
   const [approvals, setApprovals] = React.useState<ChatApproval[]>([]);
   const [filter, setFilter] = React.useState<'pending' | 'all'>('pending');
   const [loading, setLoading] = React.useState(false);
+	const [tasks, setTasks] = React.useState<ScheduledTaskDTO[]>([]);
 
   const loadApprovals = React.useCallback(async () => {
     setLoading(true);
     try {
-      const data = await chatApi.getPendingApprovals();
-      setApprovals(data);
+		const [data, scheduled] = await Promise.all([chatApi.getPendingApprovals(), scheduledTaskApi.findAll().catch(() => [])]);
+      setApprovals(data); setTasks(scheduled);
     } catch (err) {
       console.error('Failed to load approvals:', err);
     } finally {
@@ -41,10 +43,16 @@ export function Inbox() {
       }
       // Update local state
       setApprovals(prev => prev.map(a => a.ulid === id ? { ...a, status: action } : a));
+		const approval = approvals.find(item => item.ulid === id);
+		if (action === 'approved' && approval?.tool_name === 'Scheduled result review') onViewChange?.('chat');
     } catch (err) {
       console.error('Failed to handle approval:', err);
     }
   };
+
+	const toggleTask = async (task: ScheduledTaskDTO) => { const status = task.status === 'active' ? 'paused' : 'active'; await scheduledTaskApi.setStatus(task.ulid, status); setTasks(current => current.map(item => item.ulid === task.ulid ? { ...item, status } : item)); };
+	const deleteTask = async (task: ScheduledTaskDTO) => { if (!window.confirm(t('inbox.deleteTaskConfirm'))) return; await scheduledTaskApi.delete(task.ulid); setTasks(current => current.filter(item => item.ulid !== task.ulid)); };
+	const taskIcon = (type: ScheduledTaskDTO['task_type']) => type === 'ticket' ? Ticket : type === 'product' ? ShoppingBag : type === 'appointment' ? Stethoscope : Clock;
 
   return (
     <div className="theme-canvas h-full flex flex-col overflow-hidden">
@@ -96,6 +104,7 @@ export function Inbox() {
 
       <div className="flex-1 overflow-y-auto p-6 scrollbar-hide">
         <div className="max-w-4xl mx-auto space-y-4">
+			{tasks.length > 0 && <section className="mb-8"><div className="mb-3 flex items-center justify-between"><div><h2 className="font-bold text-slate-900">{t('inbox.scheduledTasks')}</h2><p className="text-xs text-slate-500">{t('inbox.scheduledTasksHint')}</p></div><span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-500">{tasks.length}</span></div><div className="grid gap-3 md:grid-cols-2">{tasks.map(task => { const TaskIcon = taskIcon(task.task_type); return <article key={task.ulid} className="theme-card rounded-2xl border border-slate-200 p-4"><div className="flex items-start gap-3"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-600"><TaskIcon size={18}/></div><div className="min-w-0 flex-1"><p className="truncate text-sm font-bold text-slate-900">{task.name}</p><p className="mt-1 font-mono text-[10px] text-slate-400">{task.cron} · {task.timezone}</p></div><span className={cn('rounded-full px-2 py-1 text-[9px] font-bold uppercase', task.status === 'active' ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-500')}>{t(`inbox.taskStatus.${task.status}`)}</span></div><p className="mt-3 line-clamp-2 text-xs leading-5 text-slate-600">{task.prompt}</p>{task.last_error && <p className="mt-2 line-clamp-2 text-[10px] text-red-500">{task.last_error}</p>}<div className="mt-4 flex justify-end gap-2"><button onClick={() => void toggleTask(task)} className="rounded-lg border border-slate-200 p-2 text-slate-500 hover:bg-slate-50">{task.status === 'active' ? <Pause size={14}/> : <Play size={14}/>}</button><button onClick={() => void deleteTask(task)} className="rounded-lg border border-slate-200 p-2 text-slate-400 hover:border-red-200 hover:text-red-500"><Trash2 size={14}/></button></div></article>; })}</div></section>}
           {filteredApprovals.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 text-center">
               <div className="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center text-slate-300 mb-4">
@@ -165,7 +174,7 @@ export function Inbox() {
                       className="flex items-center gap-2 px-6 py-2 bg-brand-500 text-white rounded-lg text-sm font-bold hover:bg-brand-600 transition-all shadow-lg shadow-brand-500/20"
                     >
                       <UserCheck size={16} />
-                      {t('inbox.approve')}
+                      {approval.tool_name === 'Scheduled result review' ? t('inbox.continueInChat') : t('inbox.approve')}
                     </button>
                   </div>
                 )}
