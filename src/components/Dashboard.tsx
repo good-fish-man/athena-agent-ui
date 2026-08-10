@@ -35,6 +35,7 @@ import { authStore } from '../lib/auth';
 
 interface DashboardProps {
   onViewChange: (view: View) => void;
+  onCreateAgent?: () => void;
 }
 
 // Format number to K/M shorthand
@@ -58,7 +59,7 @@ const formatTimeAgo = (timestamp: number): string => {
   return `${days}d ago`;
 };
 
-export function Dashboard({ onViewChange }: DashboardProps) {
+export function Dashboard({ onViewChange, onCreateAgent }: DashboardProps) {
   const { t } = useTranslation();
   const currentUserId = authStore.userID();
 
@@ -206,7 +207,7 @@ export function Dashboard({ onViewChange }: DashboardProps) {
   ];
 
   const quickActions = [
-    { label: t('dashboard.createAgent'), icon: Plus, view: 'orchestrator' as View, color: 'bg-brand-500 text-white hover:bg-brand-600' },
+    { label: t('dashboard.createAgent'), icon: Plus, view: 'orchestrator' as View, onClick: onCreateAgent, color: 'bg-brand-500 text-white hover:bg-brand-600' },
     { label: t('dashboard.addKnowledge'), icon: Database, view: 'knowledge' as View, color: 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50' },
     { label: t('dashboard.configureModel'), icon: Cpu, view: 'models' as View, color: 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50' },
   ];
@@ -277,7 +278,7 @@ export function Dashboard({ onViewChange }: DashboardProps) {
           {quickActions.map((action) => (
             <button
               key={action.label}
-              onClick={() => onViewChange(action.view)}
+              onClick={() => action.onClick ? action.onClick() : onViewChange(action.view)}
               className={cn(
                 "flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all shadow-sm",
                 action.color

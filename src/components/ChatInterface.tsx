@@ -56,7 +56,7 @@ import { useDropzone } from 'react-dropzone';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
 import { cn } from '../lib/utils';
-import { Message, FileInfo, Agent, Conversation, PendingApproval, ChatSession } from '../types';
+import { Message, FileInfo, Agent, Conversation, PendingApproval, ChatSession, type BrowserSuggestedAction, type ControlObservation, type ResearchSourcePage } from '../types';
 import { agentApi, chatApi, controlApi, REPORT_API_BASE, siteCredentialApi, type RunHistoryMessage, type SiteCredential } from '../lib/api';
 import { useTranslation } from 'react-i18next';
 import { authStore } from '../lib/auth';
@@ -75,6 +75,8 @@ import {
 import { currentLocationForMessage } from '../lib/geolocation';
 import { desktopPermissions } from '../lib/desktopPermissions';
 import { formatAssistantOutput } from '../lib/outputFormatting';
+import ResearchSourcesPanel from './ResearchSourcesPanel';
+import BrowserExecutionPanel, { hasBrowserExecution } from './BrowserExecutionPanel';
 
 // 辅助函数：检测并提取 Markdown 中的 HTML 代码块
 function extractHtmlFromMarkdown(content: string): { html: string | null; markdown: string; reportUrl: string | null; pptUrl: string | null } {
@@ -311,8 +313,524 @@ function formatObservationResult(data: any): string {
   if (data.status) lines.push(`Status: ${data.status}`);
   if (data.error) lines.push(`Error: ${data.error}`);
   if (data.session_id) lines.push(`Session: ${data.session_id}`);
-  if (data.state) lines.push(`State:\n${formatToolPayload(data.state)}`);
+  if (data.state) {
+    const state = data.state;
+    const summary = {
+      ...(state.url ? { url: state.url } : {}),
+      ...(state.title ? { title: state.title } : {}),
+      ...(state.playback ? { playback: state.playback } : {}),
+      ...(state.browser_task ? { browser_task: state.browser_task } : {}),
+      ...(state.challenge ? { challenge: state.challenge } : {}),
+      ...(state.verification ? { verification: state.verification } : {}),
+    };
+    if (Object.keys(summary).length > 0) lines.push(`State:\n${formatToolPayload(summary)}`);
+  }
   return lines.join('\n\n') || formatToolPayload(data);
+}
+
+type ResearchSnapshot = {
+  queryTexts: string[];
+  pages: ResearchSourcePage[];
+  confidence: number;
+  queryCount: number;
+  sourceCount: number;
+};
+
+function boundedScore(value: unknown): number {
+  const number = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(number)) return 0;
+  return Math.max(0, Math.min(1, number));
+}
+
+function normalizeResearchQueryTexts(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value
+    .filter((item): item is string => typeof item === 'string')
+    .map(item => item.trim().slice(0, 240))
+    .filter(Boolean))]
+    .slice(0, 10);
+}
+
+function normalizeResearchPages(value: unknown): ResearchSourcePage[] {
+  if (!Array.isArray(value)) return [];
+  const pages: ResearchSourcePage[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue;
+    const source = item as Record<string, unknown>;
+    const rawUrl = typeof source.url === 'string' ? source.url.trim() : '';
+    let parsed: URL;
+    try {
+      parsed = new URL(rawUrl);
+    } catch {
+      continue;
+    }
+    if (!['http:', 'https:'].includes(parsed.protocol) || seen.has(parsed.href)) continue;
+    seen.add(parsed.href);
+    const title = typeof source.title === 'string' && source.title.trim() ? source.title.trim().slice(0, 240) : parsed.hostname;
+    const valueSignals = Array.isArray(source.value_signals)
+      ? source.value_signals.filter((signal): signal is string => typeof signal === 'string').map(signal => signal.trim()).filter(Boolean).slice(0, 6)
+      : Array.isArray(source.valueSignals)
+        ? source.valueSignals.filter((signal): signal is string => typeof signal === 'string').map(signal => signal.trim()).filter(Boolean).slice(0, 6)
+        : [];
+    pages.push({
+      id: typeof source.id === 'string' ? source.id : `source-${pages.length + 1}`,
+      rank: typeof source.rank === 'number' && source.rank > 0 ? Math.floor(source.rank) : pages.length + 1,
+      title,
+      url: parsed.href,
+      domain: parsed.hostname,
+      provider: typeof source.provider === 'string' ? source.provider.slice(0, 80) : undefined,
+      kind: typeof source.kind === 'string' ? source.kind.slice(0, 40) : undefined,
+      snippet: typeof source.snippet === 'string' ? source.snippet.trim().slice(0, 283) : undefined,
+      valueSignals,
+      authority: boundedScore(source.authority),
+      relevance: boundedScore(source.relevance),
+      freshness: boundedScore(source.freshness),
+      evidenceScore: boundedScore(source.evidence_score ?? source.evidenceScore),
+      fetched: source.fetched === true,
+      publishedAt: typeof source.published_at === 'string'
+        ? source.published_at.slice(0, 40)
+        : typeof source.publishedAt === 'string' ? source.publishedAt.slice(0, 40) : undefined,
+    });
+    if (pages.length >= 8) break;
+  }
+  return pages;
+}
+
+function researchSnapshotFromToolCalls(toolCalls: Message['toolCalls']): ResearchSnapshot | undefined {
+  const call = [...(toolCalls || [])].reverse().find(item => item.name === 'research.execute' && item.researchPages?.length);
+  if (!call?.researchPages?.length) return undefined;
+  return {
+    queryTexts: normalizeResearchQueryTexts(call.researchQueryTexts),
+    pages: normalizeResearchPages(call.researchPages),
+    confidence: boundedScore(call.researchConfidence),
+    queryCount: typeof call.searchQueries === 'number' ? call.searchQueries : 0,
+    sourceCount: typeof call.researchSources === 'number' ? call.researchSources : call.researchPages.length,
+  };
+}
+
+function researchToolCallFromSnapshot(value: unknown): NonNullable<Message['toolCalls']>[number] | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const snapshot = value as Record<string, unknown>;
+  const pages = normalizeResearchPages(snapshot.pages);
+  if (pages.length === 0) return undefined;
+  return {
+    name: 'research.execute',
+    args: {},
+    result: 'Research evidence is ready',
+    progress: 100,
+    progressStage: 'complete',
+    progressMessage: 'Research evidence is ready',
+    searchQueries: typeof snapshot.queryCount === 'number' ? snapshot.queryCount : 0,
+    researchSources: typeof snapshot.sourceCount === 'number' ? snapshot.sourceCount : pages.length,
+    researchConfidence: boundedScore(snapshot.confidence),
+    researchQueryTexts: normalizeResearchQueryTexts(snapshot.queryTexts),
+    researchPages: pages,
+    status: 'completed',
+  };
+}
+
+type BrowserExecutionSnapshot = {
+  actionId?: string;
+  name: string;
+  args: Record<string, unknown>;
+  status?: 'pending' | 'running' | 'completed' | 'error';
+  observation: ControlObservation;
+  suggestedActions?: BrowserSuggestedAction[];
+};
+
+function browserRecord(value: unknown): Record<string, any> | undefined {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, any>
+    : undefined;
+}
+
+function browserText(value: unknown, limit = 500): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const result = value.trim();
+  return result ? result.slice(0, limit) : undefined;
+}
+
+function browserURL(value: unknown): string | undefined {
+  const raw = browserText(value, 2048);
+  if (!raw) return undefined;
+  try {
+    const parsed = new URL(raw);
+    if (!['http:', 'https:'].includes(parsed.protocol)) return undefined;
+    parsed.username = '';
+    parsed.password = '';
+    parsed.hash = '';
+    for (const key of [...parsed.searchParams.keys()]) {
+      if (/(?:^|_)(?:access_?token|refresh_?token|id_?token|token|code|api_?key|key|password|passwd|secret|authorization|auth|session|signature|sig)(?:$|_)/i.test(key)) {
+        parsed.searchParams.delete(key);
+      }
+    }
+    return parsed.toString().slice(0, 2048);
+  } catch {
+    return undefined;
+  }
+}
+
+function browserNumber(value: unknown): number | undefined {
+  const result = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(result) ? result : undefined;
+}
+
+function browserBoolean(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined;
+}
+
+function compactRecord(value: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined));
+}
+
+function browserSafeArguments(value: unknown): Record<string, unknown> {
+  const source = browserRecord(value) || {};
+  return compactRecord({
+    goal: browserText(source.goal, 240),
+    target: browserText(source.target, 240),
+    query: browserText(source.query, 240),
+    url: browserURL(source.url),
+    action: browserText(source.action, 80),
+    ordinal: browserNumber(source.ordinal),
+    automation_id: browserText(source.automation_id, 120),
+    ref: /^@e\d+$/.test(browserText(source.ref, 40) || '') ? browserText(source.ref, 40) : undefined,
+    target_ref: /^@e\d+$/.test(browserText(source.target_ref, 40) || '') ? browserText(source.target_ref, 40) : undefined,
+    target_url: browserURL(source.target_url),
+    expected_page_url: browserURL(source.expected_page_url),
+    target_label: browserText(source.target_label, 240),
+    destination_label: browserText(source.destination_label, 240),
+    snapshot: browserBoolean(source.snapshot),
+    verify_playback: browserBoolean(source.verify_playback),
+  });
+}
+
+function browserSafeCandidate(value: unknown): Record<string, unknown> | undefined {
+  const source = browserRecord(value);
+  if (!source) return undefined;
+  const evidence = browserRecord(source.evidence);
+  const box = browserRecord(source.bounding_box);
+  return compactRecord({
+    id: browserText(source.id, 160),
+    label: browserText(source.label, 240),
+    url: browserURL(source.url),
+    ref: browserText(source.ref, 160),
+    role: browserText(source.role, 80),
+    kind: browserText(source.kind, 80),
+    position: browserNumber(source.position),
+    order: browserNumber(source.order),
+    playable: browserBoolean(source.playable),
+    source: browserText(source.source, 80),
+    confidence: browserNumber(source.confidence),
+    evidence: evidence ? compactRecord({
+      semantic: browserNumber(evidence.semantic),
+      kind: browserNumber(evidence.kind),
+      ordinal: browserNumber(evidence.ordinal),
+      source: browserNumber(evidence.source),
+      page: browserNumber(evidence.page),
+      visual: browserNumber(evidence.visual),
+      spatial: browserNumber(evidence.spatial),
+    }) : undefined,
+    bounding_box: box ? compactRecord({
+      x: browserNumber(box.x),
+      y: browserNumber(box.y),
+      width: browserNumber(box.width),
+      height: browserNumber(box.height),
+    }) : undefined,
+  });
+}
+
+function browserSafeResolution(value: unknown): Record<string, unknown> | undefined {
+  const source = browserRecord(value);
+  if (!source) return undefined;
+  const spatial = browserRecord(source.spatial_relation);
+  return compactRecord({
+    schema: browserText(source.schema, 120),
+    decision: browserText(source.decision, 40),
+    risk: browserText(source.risk, 40),
+    threshold: browserNumber(source.threshold),
+    observe_threshold: browserNumber(source.observe_threshold),
+    confidence: browserNumber(source.confidence),
+    reason: browserText(source.reason, 320),
+    requested_ordinal: browserNumber(source.requested_ordinal),
+    requires_visual: browserBoolean(source.requires_visual),
+    requires_spatial: browserBoolean(source.requires_spatial),
+    fallback_used: browserBoolean(source.fallback_used),
+    spatial_relation: spatial ? compactRecord({
+      direction: browserText(spatial.direction, 40),
+      anchor_label: browserText(spatial.anchor_label, 160),
+      anchor_role: browserText(spatial.anchor_role, 80),
+      resolved: browserBoolean(spatial.resolved),
+    }) : undefined,
+    selected: browserSafeCandidate(source.selected),
+    candidates: Array.isArray(source.candidates)
+      ? source.candidates.map(browserSafeCandidate).filter(Boolean).slice(0, 8)
+      : undefined,
+  });
+}
+
+function browserSafeInteractions(value: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(value)) return [];
+  return value.map(item => {
+    const source = browserRecord(item) || {};
+    const policy = browserRecord(source.policy);
+    const verification = browserRecord(source.verification);
+    return compactRecord({
+      schema: browserText(source.schema, 120),
+      action: browserText(source.action, 80),
+      status: browserText(source.status, 40),
+      reason: browserText(source.reason, 320),
+      attempts: browserNumber(source.attempts),
+      reobserved: browserBoolean(source.reobserved),
+      recovered: browserBoolean(source.recovered),
+      started_at: browserText(source.started_at, 64),
+      completed_at: browserText(source.completed_at, 64),
+      duration_ms: browserNumber(source.duration_ms),
+      policy: policy ? compactRecord({
+        risk: browserText(policy.risk, 40),
+        decision: browserText(policy.decision, 40),
+        reason: browserText(policy.reason, 240),
+      }) : undefined,
+      verification: verification ? compactRecord({
+        schema: browserText(verification.schema, 120),
+        action: browserText(verification.action, 80),
+        status: browserText(verification.status, 40),
+        reason: browserText(verification.reason, 240),
+        confidence: browserNumber(verification.confidence),
+      }) : undefined,
+    });
+  }).slice(0, 12);
+}
+
+function browserSafeTask(value: unknown): Record<string, unknown> | undefined {
+  const source = browserRecord(value);
+  if (!source) return undefined;
+  const planning = browserRecord(source.planning);
+  const budget = browserRecord(source.execution_budget);
+  return compactRecord({
+    goal: browserText(source.goal, 240),
+    target: browserText(source.target, 240),
+    query: browserText(source.query, 240),
+    selected_label: browserText(source.selected_label, 240),
+    intent: browserText(source.intent, 100),
+    resolved_url: browserURL(source.resolved_url),
+    selected_url: browserURL(source.selected_url),
+    candidate_source: browserText(source.candidate_source, 80),
+    planning: planning ? compactRecord({
+      schema: browserText(planning.schema, 120),
+      strategy: browserText(planning.strategy, 100),
+      reason: browserText(planning.reason, 320),
+      max_actions: browserNumber(planning.max_actions),
+    }) : undefined,
+    resolution: browserSafeResolution(source.resolution),
+    execution_budget: budget ? compactRecord({
+      max_actions: browserNumber(budget.max_actions),
+      used_actions: browserNumber(budget.used_actions),
+      remaining_actions: browserNumber(budget.remaining_actions),
+    }) : undefined,
+    interactions: browserSafeInteractions(source.interactions),
+    steps: Array.isArray(source.steps)
+      ? source.steps.map(item => browserText(item, 120)).filter((item): item is string => Boolean(item)).slice(0, 16)
+      : undefined,
+    completed: browserBoolean(source.completed),
+    message: browserText(source.message, 500),
+  });
+}
+
+function browserSafeAutomation(value: unknown): Record<string, unknown> | undefined {
+  const source = browserRecord(value);
+  if (!source) return undefined;
+  const rules = Array.isArray(source.rules) ? source.rules : [];
+  const events = Array.isArray(source.recent_events) ? source.recent_events : [];
+  return compactRecord({
+    schema: browserText(source.schema, 120),
+    mode: browserText(source.mode, 40),
+    active_count: browserNumber(source.active_count),
+    rule_count: browserNumber(source.rule_count),
+    monitor_modes: Array.isArray(source.monitor_modes)
+      ? source.monitor_modes.map(item => browserText(item, 80)).filter((item): item is string => Boolean(item)).slice(0, 6)
+      : undefined,
+    rules: rules.map(item => {
+      const rule = browserRecord(item) || {};
+      return compactRecord({
+        id: browserText(rule.id, 120),
+        name: browserText(rule.name, 160),
+        enabled: browserBoolean(rule.enabled),
+        status: browserText(rule.status, 40),
+        monitor_mode: browserText(rule.monitor_mode, 80),
+        last_error: browserText(rule.last_error, 320),
+        monitor_error: browserText(rule.monitor_error, 320),
+      });
+    }).slice(0, 8),
+    recent_events: events.map(item => {
+      const event = browserRecord(item) || {};
+      return compactRecord({
+        event_id: browserText(event.event_id, 120),
+        type: browserText(event.type, 80),
+        status: browserText(event.status, 40),
+        lifecycle: browserText(event.lifecycle, 40),
+        observed_at: browserText(event.observed_at, 64),
+        error: browserText(event.error, 320),
+      });
+    }).slice(0, 8),
+  });
+}
+
+function browserSafeObservation(value: unknown): ControlObservation | undefined {
+  const source = browserRecord(value);
+  const state = browserRecord(source?.state);
+  if (!source || !state || (!state.browser_task && !state.automation_state && !state.capability_handoff)) return undefined;
+  const handoff = browserRecord(state.capability_handoff);
+  const playback = browserRecord(state.playback);
+  const safeState = compactRecord({
+    url: browserURL(state.url),
+    title: browserText(state.title, 500),
+    playback: playback ? compactRecord({
+      verified: browserBoolean(playback.verified),
+      playing: browserBoolean(playback.playing),
+      title: browserText(playback.title, 240),
+    }) : undefined,
+    browser_task: browserSafeTask(state.browser_task),
+    automation_state: browserSafeAutomation(state.automation_state),
+    capability_handoff: handoff ? compactRecord({
+      schema: browserText(handoff.schema, 120),
+      from: browserText(handoff.from, 100),
+      to: browserText(handoff.to, 100),
+      reason: browserText(handoff.reason, 240),
+      query: browserText(handoff.query, 240),
+      session_id: browserText(handoff.session_id, 160),
+      continuation_required: browserBoolean(handoff.continuation_required),
+    }) : undefined,
+    continuation_required: browserBoolean(state.continuation_required),
+  });
+  return {
+    protocol: browserText(source.protocol, 120) || 'athena.action-observation.v3',
+    type: browserText(source.type, 40) || 'OBSERVATION',
+    task_id: browserText(source.task_id, 160) || '',
+    action_id: browserText(source.action_id, 160) || '',
+    session_id: browserText(source.session_id, 160),
+    sequence: browserNumber(source.sequence) || 0,
+    status: browserText(source.status, 40) || 'SUCCEEDED',
+    observed_at: browserText(source.observed_at, 64),
+    error: browserText(source.error, 1000),
+    state: safeState,
+  };
+}
+
+function browserSafeSuggestedActions(value: unknown): BrowserSuggestedAction[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap(item => {
+    const source = browserRecord(item);
+    if (!source) return [];
+    const id = browserText(source.id, 160);
+    const label = browserText(source.label, 240);
+    const capability = browserText(source.capability, 120);
+    if (!id || !label || !capability) return [];
+    return [{
+      schema: 'athena.browser.suggestion.v1',
+      id,
+      label,
+      description: browserText(source.description, 320),
+      capability,
+      kind: browserText(source.kind, 80) || 'navigate',
+      arguments: browserSafeArguments(source.arguments),
+      risk: browserText(source.risk, 40) || 'LOW',
+    } as BrowserSuggestedAction];
+  }).slice(0, 4);
+}
+
+function browserSnapshotsFromToolCalls(toolCalls: Message['toolCalls']): BrowserExecutionSnapshot[] {
+  return (toolCalls || []).flatMap(call => {
+    const observation = browserSafeObservation(call.observation);
+    if (!observation) return [];
+    const suggestedActions = browserSafeSuggestedActions(call.suggestedActions);
+    return [{
+      actionId: browserText(call.actionId, 160),
+      name: browserText(call.name, 120) || 'browser.task',
+      args: browserSafeArguments(call.args),
+      status: call.status,
+      observation,
+      suggestedActions: suggestedActions.length > 0 ? suggestedActions : undefined,
+    }];
+  }).slice(-8);
+}
+
+function browserToolCallsFromSnapshot(value: unknown): NonNullable<Message['toolCalls']> {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap(item => {
+    const source = browserRecord(item);
+    const observation = browserSafeObservation(source?.observation);
+    if (!source || !observation) return [];
+    const suggestedActions = browserSafeSuggestedActions(source.suggestedActions);
+    const status = source.status === 'error' || source.status === 'running' || source.status === 'pending'
+      ? source.status
+      : 'completed';
+    return [{
+      actionId: browserText(source.actionId, 160),
+      name: browserText(source.name, 120) || 'browser.task',
+      args: browserSafeArguments(source.args),
+      result: formatObservationResult(observation),
+      observation,
+      suggestedActions,
+      suggestionStatus: suggestedActions.length > 0 ? 'idle' as const : undefined,
+      status,
+    }];
+  }).slice(-8);
+}
+
+function browserSuggestionsFromObservation(data: any): BrowserSuggestedAction[] {
+  const suggestions = data?.state?.suggested_actions;
+  if (!Array.isArray(suggestions)) return [];
+  return suggestions.filter((item): item is BrowserSuggestedAction => (
+    item?.schema === 'athena.browser.suggestion.v1'
+    && typeof item.id === 'string'
+    && typeof item.label === 'string'
+    && typeof item.capability === 'string'
+    && item.arguments !== null
+    && typeof item.arguments === 'object'
+  )).slice(0, 4);
+}
+
+function browserObservationSummary(data: any, translate: (key: any) => string): string {
+  if (data?.status !== 'SUCCEEDED') {
+    const detail = typeof data?.error === 'string' ? data.error.trim() : '';
+    return detail
+      ? `${translate('chat.browserActionFailed')}\n\n${detail}`
+      : translate('chat.browserActionFailed');
+  }
+  const state = data?.state || {};
+  const summary = state?.playback?.verified === true
+    ? translate('chat.browserPlaybackVerified')
+    : translate('chat.browserActionSucceeded');
+  const pageUrl = typeof state.url === 'string' ? state.url.trim() : '';
+  const pageTitle = typeof state.title === 'string' && state.title.trim()
+    ? state.title.trim()
+    : pageUrl;
+  if (!pageUrl || !pageTitle) return summary;
+  return `${summary}\n\n${translate('chat.browserCurrentPage')}: [${pageTitle}](${pageUrl})`;
+}
+
+function toolCallsWithObservation(toolCalls: Message['toolCalls'], data: any): Message['toolCalls'] {
+  const calls = toolCalls || [];
+  const targetIndex = data.action_id ? calls.findIndex(call => call.actionId === data.action_id) : -1;
+  const updateIndex = targetIndex >= 0 ? targetIndex : calls.length - 1;
+  const suggestedActions = browserSuggestionsFromObservation(data);
+  const update = (call: NonNullable<Message['toolCalls']>[number]) => ({
+    ...call,
+    result: formatObservationResult(data),
+    observation: data,
+    suggestedActions,
+    suggestionStatus: suggestedActions.length > 0 ? 'idle' as const : call.suggestionStatus,
+    status: data.status === 'SUCCEEDED' ? 'completed' as const : 'error' as const,
+  });
+  if (updateIndex >= 0) {
+    return calls.map((call, index) => index === updateIndex ? update(call) : call);
+  }
+  return [update({
+    actionId: data.action_id,
+    name: data.capability || 'device.observation',
+    args: {},
+  })];
 }
 
 function formatProgressResult(data: any): string {
@@ -325,7 +843,51 @@ function formatProgressResult(data: any): string {
     lines.push(`Downloaded: ${formatBytes(data.bytes)}${total}`);
   }
   if (data.state?.path) lines.push(`Path: ${data.state.path}`);
+	if (typeof data.state?.queries === 'number') lines.push(`Queries: ${data.state.queries}`);
+	if (typeof data.state?.sources === 'number') lines.push(`Sources: ${data.state.sources}`);
+	if (typeof data.state?.confidence === 'number' && data.state.confidence > 0) {
+		lines.push(`Confidence: ${Math.round(data.state.confidence * 100)}%`);
+	}
   return lines.join('\n') || formatToolPayload(data);
+}
+
+function toolCallsWithProgress(toolCalls: Message['toolCalls'], data: any): Message['toolCalls'] {
+  const calls = toolCalls || [];
+  const completed = progressCompleted(data);
+  const targetIndex = data.action_id ? calls.findIndex(call => call.actionId === data.action_id) : -1;
+  const updateIndex = targetIndex >= 0 ? targetIndex : lastRunningToolCallIndex(calls);
+  const pages = normalizeResearchPages(data.state?.valuable_pages);
+  const queryTexts = normalizeResearchQueryTexts(data.state?.query_texts);
+  const update = (call: NonNullable<Message['toolCalls']>[number]) => ({
+    ...call,
+    result: formatProgressResult(data),
+    progress: typeof data.progress === 'number' ? data.progress : call.progress,
+    progressStage: data.stage || call.progressStage,
+    progressMessage: data.message || call.progressMessage,
+    bytes: typeof data.bytes === 'number' ? data.bytes : call.bytes,
+    total: typeof data.total === 'number' ? data.total : call.total,
+    searchQueries: typeof data.state?.queries === 'number' ? data.state.queries : call.searchQueries,
+    researchSources: typeof data.state?.sources === 'number' ? data.state.sources : call.researchSources,
+    researchConfidence: typeof data.state?.confidence === 'number' ? data.state.confidence : call.researchConfidence,
+    researchQueryTexts: queryTexts.length > 0 ? queryTexts : call.researchQueryTexts,
+    researchPages: pages.length > 0 ? pages : call.researchPages,
+    status: completed ? 'completed' as const : 'running' as const,
+  });
+  if (updateIndex >= 0) {
+    return calls.map((call, index) => index === updateIndex ? update(call) : call);
+  }
+  return [
+    ...calls,
+    update({
+      actionId: data.action_id,
+      name: data.capability || 'device.progress',
+      args: {},
+    }),
+  ];
+}
+
+function progressCompleted(data: any): boolean {
+	return data?.state?.completed === true || data?.stage === 'complete' || data?.progress >= 100;
 }
 
 function formatBytes(value: number): string {
@@ -505,6 +1067,7 @@ interface ChatInterfaceProps {
   preselectedAgent?: Agent | null;
   onAgentUsed?: () => void;
   onCreateAgent?: () => void;
+  onEditAgent?: (agent: Agent) => void;
 }
 
 const LAST_AGENT_KEY_PREFIX = 'athena:chat:lastAgentId:';
@@ -593,7 +1156,9 @@ function buildAssistantMetadata(
   imageUrls: string[],
   prompt: string,
   internalControlTagStripped: boolean,
-  invalidImagePlanningOutput: boolean,
+	invalidImagePlanningOutput: boolean,
+	research?: ResearchSnapshot,
+	browserExecutions?: BrowserExecutionSnapshot[],
 ): string | undefined {
   const metadata: Record<string, unknown> = {};
   if (imageUrls.length > 0) {
@@ -605,6 +1170,12 @@ function buildAssistantMetadata(
   if (invalidImagePlanningOutput) {
     metadata.invalidImagePlanningOutput = true;
   }
+	if (research?.pages.length) {
+		metadata.research = research;
+	}
+	if (browserExecutions?.length) {
+		metadata.browserExecutions = browserExecutions;
+	}
   return Object.keys(metadata).length > 0 ? JSON.stringify(metadata) : undefined;
 }
 
@@ -717,13 +1288,14 @@ function hasRecentGeneratedImage(messages: Message[]): boolean {
   return false;
 }
 
-export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: ChatInterfaceProps) {
+export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent, onEditAgent }: ChatInterfaceProps) {
 	const currentUserId = authStore.userID();
   const { t, i18n } = useTranslation();
 	const [voiceLanguage, setVoiceLanguage] = React.useState(() => localStorage.getItem('chat.voice.language') || 'en-US');
 	const autoBoundDeviceRef = React.useRef<string>('');
   const [messages, setMessages] = React.useState<Message[]>([]);
 	const messagesRef = React.useRef<Message[]>([]);
+	const browserSuggestionLocksRef = React.useRef<Set<string>>(new Set());
 	React.useEffect(() => {
 		messagesRef.current = messages;
 	}, [messages]);
@@ -830,6 +1402,7 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
   const pendingFilesRef = React.useRef<File[]>([]); // 保存待上传的原始 File 对象
   const [agents, setAgents] = React.useState<Agent[]>([]);
   const [activeAgent, setActiveAgent] = React.useState<Agent | null>(null);
+  const [isOpeningAgentEditor, setIsOpeningAgentEditor] = React.useState(false);
   const [isLoading, setIsLoading] = React.useState(false);
   const [conversations, setConversations] = React.useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = React.useState<string | null>(null);
@@ -926,12 +1499,18 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
         const { html, markdown, reportUrl, pptUrl } = extractHtmlFromMarkdown(m.content);
         // Parse files from metadata if present
         let files: FileInfo[] | undefined;
+		let toolCalls: Message['toolCalls'];
         if (m.metadata) {
           try {
             const meta = JSON.parse(m.metadata);
             if (meta.files && Array.isArray(meta.files)) {
               files = meta.files;
             }
+			const restoredToolCalls: NonNullable<Message['toolCalls']> = [];
+			const researchCall = researchToolCallFromSnapshot(meta.research);
+			if (researchCall) restoredToolCalls.push(researchCall);
+			restoredToolCalls.push(...browserToolCallsFromSnapshot(meta.browserExecutions));
+			if (restoredToolCalls.length > 0) toolCalls = restoredToolCalls;
           } catch (e) {
             // Ignore parse errors
           }
@@ -944,6 +1523,7 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
           reportUrl: reportUrl || undefined,
           pptUrl: pptUrl || undefined,
           files,
+		  toolCalls,
           timestamp: new Date(m.created_at),
           status: m.status as 'pending_approval' | 'completed' | 'failed' | undefined,
           metadata: m.metadata || undefined,
@@ -1259,33 +1839,12 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
 				  }
 
 				  if (currentEventType === 'progress') {
-					const targetIndex = data.action_id ? toolCalls.findIndex(call => call.actionId === data.action_id) : -1;
-					const updateIndex = targetIndex >= 0 ? targetIndex : lastRunningToolCallIndex(toolCalls);
-					if (updateIndex >= 0) {
-					  toolCalls = toolCalls.map((call, index) => index === updateIndex
-						? {
-							...call,
-							result: formatProgressResult(data),
-							progress: typeof data.progress === 'number' ? data.progress : call.progress,
-							progressStage: data.stage || call.progressStage,
-							progressMessage: data.message || call.progressMessage,
-							bytes: typeof data.bytes === 'number' ? data.bytes : call.bytes,
-							total: typeof data.total === 'number' ? data.total : call.total,
-							status: 'running'
-						  }
-						: call);
-					} else {
-					  toolCalls = [...toolCalls, { actionId: data.action_id, name: data.capability || 'device.progress', args: {}, result: formatProgressResult(data), progress: data.progress, progressStage: data.stage, progressMessage: data.message, bytes: data.bytes, total: data.total, status: 'running' }];
-					}
+					toolCalls = toolCallsWithProgress(toolCalls, data);
 					updateMessage({ toolCalls: [...toolCalls] });
 				  }
 
 				  if (currentEventType === 'observation') {
-					const targetIndex = data.action_id ? toolCalls.findIndex(call => call.actionId === data.action_id) : -1;
-					const updateIndex = targetIndex >= 0 ? targetIndex : toolCalls.length - 1;
-					toolCalls = toolCalls.map((call, index) => index === updateIndex
-					  ? { ...call, result: formatObservationResult(data), status: data.status === 'SUCCEEDED' ? 'completed' : 'error' }
-					  : call);
+					toolCalls = toolCallsWithObservation(toolCalls, data);
 					updateMessage({ toolCalls: [...toolCalls] });
 				  }
 
@@ -1395,33 +1954,12 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
 				  }
 
 				  if (currentEventType === 'progress') {
-					const targetIndex = data.action_id ? toolCalls.findIndex(call => call.actionId === data.action_id) : -1;
-					const updateIndex = targetIndex >= 0 ? targetIndex : lastRunningToolCallIndex(toolCalls);
-					if (updateIndex >= 0) {
-					  toolCalls = toolCalls.map((call, index) => index === updateIndex
-						? {
-							...call,
-							result: formatProgressResult(data),
-							progress: typeof data.progress === 'number' ? data.progress : call.progress,
-							progressStage: data.stage || call.progressStage,
-							progressMessage: data.message || call.progressMessage,
-							bytes: typeof data.bytes === 'number' ? data.bytes : call.bytes,
-							total: typeof data.total === 'number' ? data.total : call.total,
-							status: 'running'
-						  }
-						: call);
-					} else {
-					  toolCalls = [...toolCalls, { actionId: data.action_id, name: data.capability || 'device.progress', args: {}, result: formatProgressResult(data), progress: data.progress, progressStage: data.stage, progressMessage: data.message, bytes: data.bytes, total: data.total, status: 'running' }];
-					}
+					toolCalls = toolCallsWithProgress(toolCalls, data);
 					updateMessage({ toolCalls: [...toolCalls] });
 				  }
 
 				  if (currentEventType === 'observation') {
-					const targetIndex = data.action_id ? toolCalls.findIndex(call => call.actionId === data.action_id) : -1;
-					const updateIndex = targetIndex >= 0 ? targetIndex : toolCalls.length - 1;
-					toolCalls = toolCalls.map((call, index) => index === updateIndex
-					  ? { ...call, result: formatObservationResult(data), status: data.status === 'SUCCEEDED' ? 'completed' : 'error' }
-					  : call);
+					toolCalls = toolCallsWithObservation(toolCalls, data);
 					updateMessage({ toolCalls: [...toolCalls] });
 				  }
 
@@ -1531,6 +2069,8 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
           messageText,
           internalControlTagStripped,
           invalidImagePlanningOutput,
+		  researchSnapshotFromToolCalls(toolCalls),
+		  browserSnapshotsFromToolCalls(toolCalls),
         );
         updateMessage({ content: completedContent, metadata: assistantMetadata });
         try {
@@ -1690,6 +2230,23 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
     startNewConversation();
   };
 
+  const handleEditActiveAgent = async () => {
+    if (!activeAgent || !onEditAgent || isOpeningAgentEditor) return;
+    const agentId = activeAgent.ulid || activeAgent.id;
+    if (!agentId) {
+      toast.error(t('chat.editAgentLoadFailed'));
+      return;
+    }
+    setIsOpeningAgentEditor(true);
+    try {
+      onEditAgent(await agentApi.findById(agentId));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t('chat.editAgentLoadFailed'));
+    } finally {
+      setIsOpeningAgentEditor(false);
+    }
+  };
+
   const deleteConversation = async (id: string) => {
     try {
       await chatApi.deleteSession(id);
@@ -1715,6 +2272,86 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
       console.error('Failed to load session:', err);
       toast.error('无法加载该会话');
     }
+  };
+
+  const executeBrowserSuggestion = async (
+    messageId: string,
+    toolIndex: number,
+    action: BrowserSuggestedAction,
+    sessionId: string,
+  ) => {
+	if (!sessionId) {
+	  toast.error(t('chat.browserActionSessionMissing'));
+	  return;
+	}
+	if (browserSuggestionLocksRef.current.has(sessionId)) {
+	  return;
+	}
+	browserSuggestionLocksRef.current.add(sessionId);
+	setMessages(previous => previous.map(message => ({
+	  ...message,
+	  toolCalls: message.toolCalls?.map((tool, index) => {
+		if (message.id === messageId && index === toolIndex) {
+		  return {
+			...tool,
+			selectedSuggestionId: action.id,
+			suggestionStatus: 'running',
+			suggestionError: undefined,
+		  };
+		}
+		return tool.observation?.session_id === sessionId
+		  ? { ...tool, suggestedActions: [] }
+		  : tool;
+	  }),
+	})));
+	try {
+	  const observation = await controlApi.executeSuggestedAction(action, sessionId);
+	  const succeeded = observation.status === 'SUCCEEDED';
+	  const suggestedActions = succeeded ? browserSuggestionsFromObservation(observation) : [];
+	  const updatedContent = browserObservationSummary(observation, t);
+	  setMessages(previous => previous.map(message => ({
+		...message,
+		...(message.id === messageId ? { content: updatedContent } : {}),
+		toolCalls: message.toolCalls?.map((tool, index) => {
+		  if (message.id === messageId && index === toolIndex) {
+			return {
+			  ...tool,
+			  result: formatObservationResult(observation),
+			  observation,
+			  suggestedActions,
+			  selectedSuggestionId: action.id,
+			  suggestionStatus: succeeded ? 'completed' : 'error',
+			  suggestionError: succeeded ? undefined : (observation.error || t('chat.browserActionFailed')),
+			  status: succeeded ? 'completed' : 'error',
+			};
+		  }
+		  return tool.observation?.session_id === sessionId
+			? { ...tool, suggestedActions: [] }
+			: tool;
+		}),
+	  })));
+      if (!succeeded) {
+        toast.error(observation.error || t('chat.browserActionFailed'));
+      } else if (observation.state?.playback?.verified === true) {
+        toast.success(t('chat.browserPlaybackVerified'));
+      } else {
+        toast.success(t('chat.browserActionSucceeded'));
+      }
+	} catch (error) {
+      const message = error instanceof Error ? error.message : t('chat.browserActionFailed');
+      setMessages(previous => previous.map(item => item.id !== messageId ? item : {
+        ...item,
+        toolCalls: item.toolCalls?.map((tool, index) => index !== toolIndex ? tool : {
+          ...tool,
+          selectedSuggestionId: action.id,
+          suggestionStatus: 'error',
+          suggestionError: message,
+        }),
+      }));
+	  toast.error(message);
+	} finally {
+	  browserSuggestionLocksRef.current.delete(sessionId);
+	}
   };
 
   React.useEffect(() => {
@@ -1841,11 +2478,11 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
                   {activeAgent ? getAgentIcon(activeAgent.icon || '', 15) : 'A'}
                 </div>
                 <div className="min-w-0">
-                  <h3 className="truncate text-xs font-bold text-slate-900 lg:text-sm">{activeAgent?.name || '选择 Agent'}</h3>
+                  <h3 className="truncate text-xs font-bold text-slate-900 lg:text-sm">{activeAgent?.name || t('chat.selectAgent')}</h3>
                   <div className="flex items-center gap-1.5">
                     <div className={cn("h-1.5 w-1.5 rounded-full", activeAgent ? "bg-emerald-500" : "bg-slate-300")} />
                     <span className="truncate text-[9px] font-medium text-slate-400">
-                      {activeConversationId ? '历史会话' : '新会话'}
+                      {activeConversationId ? t('chat.historicalConversation') : t('chat.newConversation')}
                     </span>
                   </div>
                 </div>
@@ -1862,7 +2499,7 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
                       exit={{ opacity: 0, y: -6, scale: 0.98 }}
                       className="absolute left-0 top-full z-30 mt-2 w-64 overflow-hidden rounded-2xl border border-slate-200 bg-white p-2 shadow-xl"
                     >
-                      <p className="px-2 pb-2 pt-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">切换 Agent</p>
+                      <p className="px-2 pb-2 pt-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">{t('chat.switchAgent')}</p>
                       <div className="max-h-72 space-y-1 overflow-y-auto">
                         {agents.map(agent => {
                           const selected = (agent.ulid || agent.id) === activeAgentId;
@@ -1882,7 +2519,7 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
                               </span>
                               <span className="min-w-0 flex-1">
                                 <span className="block truncate text-xs font-bold">{agent.name}</span>
-                                <span className="block text-[10px] text-slate-400">{conversationCount} 个会话</span>
+                                <span className="block text-[10px] text-slate-400">{t('chat.conversationCount', { count: conversationCount })}</span>
                               </span>
                               {selected && <Check size={14} className="shrink-0" />}
                             </button>
@@ -1898,7 +2535,7 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
                         className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-slate-300 px-3 py-2 text-xs font-bold text-slate-600 hover:border-brand-300 hover:bg-brand-50 hover:text-brand-600"
                       >
                         <Plus size={13} />
-                        创建新 Agent
+                        {t('chat.createAgent')}
                       </button>
                     </motion.div>
                   </>
@@ -1913,6 +2550,16 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
                 <span>{pendingApprovals.length}</span>
               </div>
             )}
+            <button
+              type="button"
+              onClick={() => void handleEditActiveAgent()}
+              disabled={!activeAgent || !onEditAgent || isLoading || isOpeningAgentEditor}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-bold text-slate-600 transition-colors hover:border-brand-200 hover:bg-brand-50 hover:text-brand-600 disabled:cursor-not-allowed disabled:opacity-50"
+              title={t('chat.editAgent')}
+            >
+              {isOpeningAgentEditor ? <Loader2 size={15} className="animate-spin" /> : <Settings size={15} />}
+              <span className="hidden sm:inline">{isOpeningAgentEditor ? t('chat.editAgentLoading') : t('chat.editAgent')}</span>
+            </button>
             <button className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 transition-colors">
               <MoreHorizontal size={20} />
             </button>
@@ -2014,8 +2661,16 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
                     {msg.toolCalls.map((tool, idx) => {
                       const toolKey = `${msg.id}-${idx}`;
                       const isCollapsed = collapsedTools[toolKey];
-                      const isRunning = tool.status === 'running' || tool.result === '执行中...';
-                      const isError = isToolResultError(tool.result, tool.status);
+					  const isRunning = tool.status === 'running' || tool.result === '执行中...' || tool.suggestionStatus === 'running';
+					  const isError = isToolResultError(tool.result, tool.status) || tool.suggestionStatus === 'error';
+					  const isResearch = tool.name === 'research.execute';
+					  const isBrowserExecution = hasBrowserExecution(tool.observation);
+					  const progressStageLabel = isResearch && tool.progressStage
+						? t(`chat.researchStages.${tool.progressStage}`, { defaultValue: tool.progressStage })
+						: tool.progressStage || 'progress';
+					  const progressMessage = isResearch && tool.progressStage
+						? t(`chat.researchMessages.${tool.progressStage}`, { defaultValue: tool.progressMessage || '' })
+						: tool.progressMessage || '';
                       return (
                         <div key={idx} className="bg-slate-50 border border-slate-100 rounded-xl overflow-hidden">
                           <div
@@ -2029,15 +2684,15 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
                           >
                             <div className="flex items-center gap-2">
                               <ChevronRight size={12} className={cn("text-slate-400 transition-transform", !isCollapsed && "rotate-90")} />
-                              <Wrench size={12} className="text-brand-500" />
-                              <span className="text-[10px] font-bold text-slate-600">
-                                {tool.name}
+							  {isResearch ? <Search size={12} className="text-brand-500" /> : <Wrench size={12} className="text-brand-500" />}
+							  <span className="text-[10px] font-bold text-slate-600">
+								{isResearch ? t('chat.researchProgress') : tool.name}
                               </span>
                             </div>
                             {isRunning ? (
                               <div className="flex items-center gap-1 text-amber-500">
                                 <div className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-bounce" />
-                                <span className="text-[10px]">执行中</span>
+								<span className="text-[10px]">{t('chat.running')}</span>
                               </div>
                             ) : isError ? (
                               <XCircle size={12} className="text-red-500" />
@@ -2047,18 +2702,20 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
                           </div>
                           {!isCollapsed && (
                             <div className="p-3 space-y-2">
-                              <div className="space-y-1">
-                                <div className="flex items-center gap-1 text-[9px] text-slate-400 uppercase font-medium">
-                                  <Terminal size={10} /> {t('chat.input')}
-                                </div>
-                                <code className="block text-[10px] text-slate-600 bg-white px-2 py-1.5 rounded border border-slate-100 font-mono">
-                                  {JSON.stringify(tool.args, null, 2)}
-                                </code>
-                              </div>
+							  {!isResearch && !isBrowserExecution && (
+								<div className="space-y-1">
+								  <div className="flex items-center gap-1 text-[9px] text-slate-400 uppercase font-medium">
+									<Terminal size={10} /> {t('chat.input')}
+								  </div>
+								  <code className="block text-[10px] text-slate-600 bg-white px-2 py-1.5 rounded border border-slate-100 font-mono">
+									{JSON.stringify(tool.args, null, 2)}
+								  </code>
+								</div>
+							  )}
                               {typeof tool.progress === 'number' && (
                                 <div className="space-y-1.5 pt-2 border-t border-slate-100">
                                   <div className="flex items-center justify-between text-[9px] font-bold uppercase text-slate-400">
-                                    <span>{tool.progressStage || 'progress'}</span>
+									<span>{progressStageLabel}</span>
                                     <span>{Math.max(0, Math.min(100, tool.progress))}%</span>
                                   </div>
                                   <div className="h-1.5 overflow-hidden rounded-full bg-white ring-1 ring-slate-100">
@@ -2070,15 +2727,25 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
                                       style={{ width: `${Math.max(3, Math.min(100, tool.progress))}%` }}
                                     />
                                   </div>
-                                  {(tool.progressMessage || tool.bytes) && (
-                                    <div className="text-[10px] text-slate-500">
-                                      {tool.progressMessage || ''}
-                                      {tool.bytes ? `${tool.progressMessage ? ' · ' : ''}${formatBytes(tool.bytes)}${tool.total ? ` / ${formatBytes(tool.total)}` : ''}` : ''}
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-                              {tool.result && (
+								  {(progressMessage || tool.bytes) && (
+									<div className="text-[10px] text-slate-500">
+									  {progressMessage}
+									  {tool.bytes ? `${progressMessage ? ' · ' : ''}${formatBytes(tool.bytes)}${tool.total ? ` / ${formatBytes(tool.total)}` : ''}` : ''}
+									</div>
+								  )}
+								  {isResearch && (
+									<div className="flex flex-wrap gap-1.5 text-[9px] font-semibold text-slate-500">
+									  {typeof tool.searchQueries === 'number' && <span className="rounded-full bg-white px-2 py-1 ring-1 ring-slate-100">{t('chat.researchQueries')}: {tool.searchQueries}</span>}
+									  {typeof tool.researchSources === 'number' && <span className="rounded-full bg-white px-2 py-1 ring-1 ring-slate-100">{t('chat.researchSources')}: {tool.researchSources}</span>}
+									  {typeof tool.researchConfidence === 'number' && tool.researchConfidence > 0 && <span className="rounded-full bg-white px-2 py-1 ring-1 ring-slate-100">{t('chat.researchConfidence')}: {Math.round(tool.researchConfidence * 100)}%</span>}
+									</div>
+								  )}
+								</div>
+							  )}
+							  {isBrowserExecution && tool.observation && (
+								<BrowserExecutionPanel observation={tool.observation} />
+							  )}
+							  {tool.result && !isResearch && (!isBrowserExecution || isError) && (
                                 <div className="space-y-1 pt-2 border-t border-slate-100">
                                   <div className="flex items-center gap-1 text-[9px] text-slate-400 uppercase font-medium">
                                     {isRunning ? (
@@ -2097,6 +2764,60 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent }: 
                               )}
                             </div>
                           )}
+						  {isResearch && tool.researchPages && tool.researchPages.length > 0 && (
+							<ResearchSourcesPanel
+							  pages={tool.researchPages}
+							  queryTexts={tool.researchQueryTexts}
+							  confidence={tool.researchConfidence}
+							/>
+						  )}
+						  {tool.suggestedActions && tool.suggestedActions.length > 0 && (
+							<div className="border-t border-slate-100 bg-white px-3 py-3">
+							  <div className="mb-2 flex items-center justify-between gap-2">
+								<div>
+								  <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">{t('chat.browserSuggestedActions')}</div>
+								  <div className="mt-0.5 text-[10px] text-slate-400">{t('chat.browserSuggestedActionsHint')}</div>
+								</div>
+								{tool.observation?.state?.playback?.verified === true && (
+								  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-[9px] font-bold text-emerald-700">
+									<Check size={10} /> {t('chat.browserPlaybackVerified')}
+								  </span>
+								)}
+							  </div>
+							  <div className="grid gap-2 sm:grid-cols-2">
+								{tool.suggestedActions.map(action => {
+								  const selected = tool.selectedSuggestionId === action.id;
+								  const running = selected && tool.suggestionStatus === 'running';
+								  const interactionLocked = isLoading || tool.suggestionStatus === 'running';
+								  return (
+									<button
+									  key={action.id}
+									  type="button"
+									  disabled={interactionLocked}
+									  onClick={() => void executeBrowserSuggestion(msg.id, idx, action, tool.observation?.session_id || '')}
+									  className={cn(
+										'group flex min-h-14 items-center gap-2 rounded-xl border px-3 py-2 text-left transition-all disabled:cursor-wait disabled:opacity-60',
+										selected && tool.suggestionStatus === 'completed'
+										  ? 'border-emerald-200 bg-emerald-50/70'
+										  : selected && tool.suggestionStatus === 'error'
+											? 'border-red-200 bg-red-50/70'
+											: 'border-slate-200 bg-slate-50 hover:border-brand-300 hover:bg-brand-50/50',
+									  )}
+									>
+									  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-brand-600 shadow-sm ring-1 ring-slate-100">
+										{running ? <Loader2 size={15} className="animate-spin" /> : action.kind === 'media' ? <Play size={15} /> : <ChevronRight size={15} />}
+									  </span>
+									  <span className="min-w-0 flex-1">
+										<span className="block truncate text-[11px] font-bold text-slate-700">{action.label}</span>
+										{action.description && <span className="mt-0.5 block line-clamp-2 text-[9px] leading-3 text-slate-400">{action.description}</span>}
+									  </span>
+									</button>
+								  );
+								})}
+							  </div>
+							  {tool.suggestionError && <div className="mt-2 text-[10px] font-medium text-red-600">{tool.suggestionError}</div>}
+							</div>
+						  )}
                         </div>
                       );
                     })}

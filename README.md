@@ -4,6 +4,11 @@
 
 Athena Agent UI is the browser interface for the Athena agent platform. It connects to [`agent-runtime-client`](https://github.com/good-fish-man/agent-runtime-client) and provides agent creation, model management, chat, project editing, knowledge, skills, voice interaction, monitoring, and service configuration in one application.
 
+<p align="center">
+  <img src="docs/images/dashboard-overview.jpg" alt="Athena dashboard with agent, task, token, approval, and conversation activity">
+</p>
+<p align="center"><sub>A live, API-backed dashboard from a running local Athena stack.</sub></p>
+
 ## Highlights
 
 - User registration/login, profile, avatar, and administrator-aware views.
@@ -18,6 +23,23 @@ Athena Agent UI is the browser interface for the Athena agent platform. It conne
 - Client, Runtime, and Skills configuration with status checks and controlled service restart.
 - User-selectable language, theme color, page background, and card surfaces.
 - Responsive desktop and mobile layouts.
+
+## Product Tour
+
+These screenshots were captured from a running Athena stack rather than static mockups. Agent names, conversations, and counters are sample data, while the views and API-backed states are the same ones used by the application.
+
+### Evidence-first research
+
+Athena exposes the research plan instead of hiding it behind a spinner: users can see the generated queries, ranked pages, source URLs, evidence scores, and the final cited response.
+
+![Research conversation with visible queries and ranked evidence](docs/images/research-evidence.jpg)
+
+### Configure agents and work on code
+
+| Agent management | Project workspace |
+| --- | --- |
+| Create and bind reusable agents without exposing provider keys to the browser. | Import a directory, inspect context, describe a project-level change, and review the patch before applying it. |
+| ![Athena agent management](docs/images/agent-management.jpg) | ![Athena project workspace](docs/images/project-workspace.jpg) |
 
 ## Architecture
 

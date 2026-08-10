@@ -81,22 +81,25 @@ export default function App() {
     setActiveView('orchestrator');
   };
 
+  const handleCreateAgent = () => {
+    setEditingAgent(null);
+    setActiveView('orchestrator');
+  };
+
   const renderView = () => {
     switch (activeView) {
       case 'dashboard':
-        return <Dashboard onViewChange={setActiveView} />;
+        return <Dashboard onViewChange={setActiveView} onCreateAgent={handleCreateAgent} />;
       case 'agents':
         return <AgentManager onViewChange={setActiveView} onPlayAgent={(agent) => {
           setPreselectedAgent(agent);
-        }} onEditAgent={handleEditAgent} />;
+        }} onEditAgent={handleEditAgent} onCreateAgent={handleCreateAgent} />;
       case 'chat':
         return <ChatInterface
           preselectedAgent={preselectedAgent}
           onAgentUsed={() => setPreselectedAgent(null)}
-          onCreateAgent={() => {
-            setEditingAgent(null);
-            setActiveView('orchestrator');
-          }}
+          onCreateAgent={handleCreateAgent}
+          onEditAgent={handleEditAgent}
         />;
       case 'workspace':
         return <ProjectWorkspace />;
@@ -145,6 +148,9 @@ export default function App() {
       <CommandCenter onViewChange={(view, data) => {
         if (view === 'knowledge' && data) {
           setPendingKBConfig(data);
+        }
+        if (view === 'orchestrator') {
+          setEditingAgent(null);
         }
         setActiveView(view);
       }} />

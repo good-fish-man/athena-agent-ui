@@ -41,11 +41,12 @@ interface AgentManagerProps {
   onViewChange: (view: View) => void;
   onPlayAgent?: (agent: Agent) => void;
   onEditAgent?: (agent: Agent) => void;
+  onCreateAgent?: () => void;
 }
 
 const AGENT_ICONS = ['Bot', 'Users', 'Sparkles', 'Brain', 'Zap', 'Workflow', 'MessageSquare', 'Globe', 'Terminal', 'Code'];
 
-export function AgentManager({ onViewChange, onPlayAgent, onEditAgent }: AgentManagerProps) {
+export function AgentManager({ onViewChange, onPlayAgent, onEditAgent, onCreateAgent }: AgentManagerProps) {
   const { t } = useTranslation();
   const [agents, setAgents] = React.useState<Agent[]>(INITIAL_AGENTS);
   const [searchQuery, setSearchQuery] = React.useState('');
@@ -346,6 +347,15 @@ export function AgentManager({ onViewChange, onPlayAgent, onEditAgent }: AgentMa
           <h1 className="text-2xl font-bold text-slate-900">{t('agents.title')}</h1>
           <p className="text-slate-500 mt-1">{t('agents.subtitle')}</p>
         </div>
+        <button
+          type="button"
+          onClick={onCreateAgent}
+          className="inline-flex items-center gap-2 rounded-xl bg-brand-500 px-4 py-2.5 text-sm font-bold text-white shadow-sm shadow-brand-500/20 transition-colors hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={!onCreateAgent}
+        >
+          <Plus size={16} />
+          {t('agents.createNew')}
+        </button>
       </div>
 
       <div className="flex items-center gap-4 mb-6">

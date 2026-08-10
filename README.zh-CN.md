@@ -4,6 +4,11 @@
 
 Athena Agent UI 是 Athena Agent 平台的浏览器界面。它连接 [`agent-runtime-client`](https://github.com/good-fish-man/agent-runtime-client)，在一个应用中提供 Agent 创建、模型管理、聊天、项目修改、知识库、Skills、语音交互、监控和服务配置。
 
+<p align="center">
+  <img src="docs/images/dashboard-overview.jpg" alt="Athena Dashboard，展示 Agent、任务、Token、审批和最近会话">
+</p>
+<p align="center"><sub>来自本地完整 Athena 服务的真实 API 数据界面。</sub></p>
+
 ## 核心能力
 
 - 用户注册/登录、个人资料、头像和管理员视图。
@@ -18,6 +23,23 @@ Athena Agent UI 是 Athena Agent 平台的浏览器界面。它连接 [`agent-ru
 - Client、Runtime 与 Skills 配置、状态检查和受控服务重启。
 - 用户可切换语言、主题色、页面背景和卡片颜色。
 - 桌面端和移动端响应式布局。
+
+## 产品预览
+
+以下截图来自实际运行的 Athena，而不是静态 Mock。Agent 名称、会话和统计数字属于演示数据，页面状态与正式应用使用的是同一套后端 API。
+
+### 证据可见的研究过程
+
+Athena 不会只显示一个等待动画：用户可以直接查看自动生成的查询词、排序后的网页、来源地址、证据评分以及最终带引用的回答。
+
+![展示查询词与来源证据的研究型对话](docs/images/research-evidence.jpg)
+
+### 配置 Agent 与修改代码
+
+| Agent 管理 | 项目工作区 |
+| --- | --- |
+| 创建可复用 Agent 并绑定模型，同时避免把供应商 Key 返回浏览器。 | 导入目录、查看上下文、描述项目级修改，并在应用前检查补丁。 |
+| ![Athena Agent 管理](docs/images/agent-management.jpg) | ![Athena 项目工作区](docs/images/project-workspace.jpg) |
 
 ## 架构
 

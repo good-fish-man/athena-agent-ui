@@ -1,4 +1,4 @@
-import type { Agent } from '../types';
+import type { Agent, BrowserSuggestedAction, ControlObservation } from '../types';
 import i18n from '../i18n';
 import {
   MODEL_RUNTIME_MODE,
@@ -117,7 +117,50 @@ export const controlApi = {
   async task(taskId: string): Promise<ControlTask> {
     return readJson<ControlTask>(await apiFetch(`${RUNTIME_API_BASE}/control/tasks/${encodeURIComponent(taskId)}`));
   },
+  async executeSuggestedAction(action: BrowserSuggestedAction, sessionId: string, deviceId = ''): Promise<ControlObservation> {
+		const allowedCapabilities = new Set(['browser.click', 'browser.play', 'browser.pause', 'browser.navigate', 'browser.press']);
+    if (action.schema !== 'athena.browser.suggestion.v1' || !allowedCapabilities.has(action.capability)) {
+      throw new Error('Unsupported browser suggestion');
+    }
+    if (!sessionId) {
+      throw new Error('The browser session is no longer available');
+    }
+    const taskId = runtimeControlID('browser-task');
+    const actionId = runtimeControlID('browser-action');
+    const risk = String(action.risk || 'LOW').toUpperCase();
+    const response = await apiFetch(`${RUNTIME_API_BASE}/control/actions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        device_id: deviceId,
+        action: {
+          protocol: 'athena.agent.v3',
+          type: 'ACTION',
+          task_id: taskId,
+          action_id: actionId,
+          session_id: sessionId,
+          sequence: 1,
+          idempotency_key: `${taskId}:${actionId}`,
+          deadline: new Date(Date.now() + 60_000).toISOString(),
+          capability: action.capability,
+          arguments: { ...action.arguments },
+          policy: {
+            risk: risk === 'MEDIUM' || risk === 'HIGH' ? risk : 'LOW',
+            decision: 'ALLOW',
+          },
+        },
+      }),
+    });
+    return readJson<ControlObservation>(response);
+  },
 };
+
+function runtimeControlID(prefix: string): string {
+  const value = typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID().replaceAll('-', '')
+    : `${Date.now().toString(16)}${Math.random().toString(16).slice(2)}`;
+  return `${prefix}-${value}`;
+}
 
 async function readJson<T = any>(res: Response): Promise<T> {
   if (res.status === 204) {
@@ -125,7 +168,7 @@ async function readJson<T = any>(res: Response): Promise<T> {
   }
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const message = json.message || `Request failed: ${res.status}`;
+    const message = json.message || json.error || `Request failed: ${res.status}`;
     const traceId = json.trace_id || res.headers.get('X-Trace-Id') || res.headers.get('X-Request-Id');
     throw new Error(traceId ? `${message} (Trace ID: ${traceId})` : message);
   }
@@ -290,6 +333,9 @@ export interface Model {
   latency: string;
   contextWindow: string;
   usage: number;
+	usageRate?: number;
+	usageCount?: number;
+	successRate?: number;
 	enabled: boolean;
 	runtimeMode: ModelRuntimeMode;
 	keyId?: string;

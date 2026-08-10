@@ -100,6 +100,9 @@ export function ModelManager() {
         latency: m.latency || 'N/A',
         contextWindow: m.contextWindow || 'N/A',
         usage: m.usage || 0,
+		usageRate: m.usageRate || 0,
+		usageCount: m.usageCount || 0,
+		successRate: m.successRate || 0,
         type: m.modelType as 'llm' | 'embedding' | 'image' | 'video',
 		capabilities: m.capabilities || '',
 		category: m.category as 'default' | 'rewrite' | 'skill' | 'summarize' | undefined,
@@ -545,14 +548,16 @@ export function ModelManager() {
                 </div>
                 <div className="p-3 bg-slate-50 rounded-xl">
                   <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">{t('models.successRate')}</p>
-                  <p className="text-sm font-bold text-slate-700">99.9%</p>
+                  <p className="text-sm font-bold text-slate-700">
+					{model.usageCount ? `${model.successRate?.toFixed(1)}%` : 'N/A'}
+				  </p>
                 </div>
               </div>
 
               <div className="space-y-2">
                 <div className="flex justify-between text-[10px] font-bold text-slate-400 uppercase">
-                  <span>Usage (Last 24h)</span>
-                  <span>{model.usage}%</span>
+				  <span>{t('models.usageLast24h')}</span>
+				  <span>{t('models.requestCount', { count: model.usageCount || 0 })} · {(model.usageRate || 0).toFixed(2)}%</span>
                 </div>
                 <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
                   <div
@@ -560,7 +565,7 @@ export function ModelManager() {
                       "h-full rounded-full transition-all duration-500",
                       model.type === 'llm' ? "bg-brand-500" : "bg-blue-500"
                     )}
-                    style={{ width: `${model.usage}%` }}
+					style={{ width: `${model.usageCount ? Math.max(model.usageRate || 0, 0.5) : 0}%` }}
                   />
                 </div>
               </div>

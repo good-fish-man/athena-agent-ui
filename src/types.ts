@@ -73,6 +73,50 @@ export interface AgentLog {
   duration?: string;
 }
 
+export interface BrowserSuggestedAction {
+  schema: 'athena.browser.suggestion.v1' | string;
+  id: string;
+  label: string;
+  description?: string;
+  kind: 'media' | 'navigate' | string;
+  capability: string;
+  arguments: Record<string, unknown>;
+  risk: 'LOW' | 'MEDIUM' | 'HIGH' | string;
+  precondition?: Record<string, unknown>;
+  postcondition?: Record<string, unknown>;
+}
+
+export interface ControlObservation {
+  protocol: string;
+  type: 'OBSERVATION' | string;
+  task_id: string;
+  action_id: string;
+  session_id?: string;
+  sequence: number;
+  status: string;
+  observed_at?: string;
+  state?: Record<string, any>;
+  error?: string;
+}
+
+export interface ResearchSourcePage {
+  id: string;
+  rank: number;
+  title: string;
+  url: string;
+  domain: string;
+  provider?: string;
+  kind?: string;
+  snippet?: string;
+  valueSignals: string[];
+  authority: number;
+  relevance: number;
+  freshness: number;
+  evidenceScore: number;
+  fetched: boolean;
+  publishedAt?: string;
+}
+
 export interface Skill {
   id: string;
   name: string;
@@ -143,7 +187,17 @@ export interface Message {
     progressMessage?: string;
     bytes?: number;
     total?: number;
+	searchQueries?: number;
+	researchSources?: number;
+	researchConfidence?: number;
+	researchQueryTexts?: string[];
+	researchPages?: ResearchSourcePage[];
     status?: 'pending' | 'running' | 'completed' | 'error';
+    observation?: ControlObservation;
+    suggestedActions?: BrowserSuggestedAction[];
+    selectedSuggestionId?: string;
+    suggestionStatus?: 'idle' | 'running' | 'completed' | 'error';
+    suggestionError?: string;
   }[];
   recallInfo?: {
     status: 'pending' | 'running' | 'completed';
@@ -207,6 +261,9 @@ export interface Model {
   latency?: string;
   contextWindow?: string;
   usage?: number;
+	usageRate?: number;
+	usageCount?: number;
+	successRate?: number;
   type: 'llm' | 'embedding' | 'image' | 'video';
   capabilities?: string;
   category?: 'default' | 'rewrite' | 'skill' | 'summarize';

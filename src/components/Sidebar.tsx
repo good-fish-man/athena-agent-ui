@@ -1,7 +1,6 @@
 import React from 'react';
 import {
   LayoutDashboard,
-  Workflow,
   Users,
   Zap,
   Database,
@@ -95,7 +94,6 @@ export function Sidebar({ activeView, onViewChange, user, onUserChange, onLogout
       label: t('sidebar.groupAgents'),
       items: [
         { id: 'agents', label: t('sidebar.agents'), description: t('sidebar.agentsDesc'), icon: Users },
-        { id: 'orchestrator', label: t('sidebar.orchestrator'), description: t('sidebar.orchestratorDesc'), icon: Workflow },
       ],
     },
     {
@@ -159,7 +157,7 @@ export function Sidebar({ activeView, onViewChange, user, onUserChange, onLogout
             <div className="space-y-1">
               {group.items.map(item => {
                 const Icon = item.icon;
-                const isActive = activeView === item.id;
+                const isActive = activeView === item.id || (item.id === 'agents' && activeView === 'orchestrator');
                 return (
                   <button
                     type="button"

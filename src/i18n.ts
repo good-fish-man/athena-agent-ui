@@ -13,6 +13,58 @@ const resources = {
         confirmDelete: 'Confirm Delete',
         deleteFailed: 'Delete failed'
       },
+      auth: {
+        runtime: 'Agent Runtime',
+        language: 'Interface language',
+        eyebrow: 'Private AI operating system',
+        mobileTitle: 'Your work starts with',
+        hero: {
+          models: 'Your models.',
+          agents: 'Your agents.',
+          memory: 'Your memory.',
+          description: 'Each account has its own model credentials, agents, and long-term memory. Public agents stay easy to use while your private configuration remains isolated.'
+        },
+        features: {
+          isolation: 'Server-side resource isolation',
+          keys: 'API keys never return to the browser',
+          memory: 'User-scoped long-term memory'
+        },
+        secureAccess: 'Secure access',
+        privateSession: 'Encrypted, account-scoped session',
+        modeLabel: 'Authentication mode',
+        modes: {
+          login: 'Sign in',
+          register: 'Create account'
+        },
+        login: {
+          title: 'Continue your work',
+          description: 'Sign in to restore your agents, models, and workspace.'
+        },
+        register: {
+          title: 'Build your private space',
+          description: 'Create an account, then connect the model you want to use.'
+        },
+        fields: {
+          username: 'Username',
+          usernamePlaceholder: 'Enter your username',
+          nickname: 'Display name',
+          nicknamePlaceholder: 'How Athena should address you',
+          password: 'Password',
+          passwordPlaceholder: 'At least 6 characters',
+          showPassword: 'Show password',
+          hidePassword: 'Hide password'
+        },
+        actions: {
+          login: 'Sign in securely',
+          register: 'Create account and sign in'
+        },
+        submitting: 'Connecting…',
+        securityNote: 'Credentials are sent only to your Runtime Client. Model providers and agents never receive your account password.',
+        footer: 'Athena private control plane',
+        errors: {
+          generic: 'Authentication failed. Please try again.'
+        }
+      },
       voiceCall: {
         simulatePerson: 'Live avatar',
         avatarOn: 'Show a live avatar during the call',
@@ -233,6 +285,14 @@ const resources = {
       chat: {
         downloadImage: 'Download image',
         history: 'History',
+        selectAgent: 'Select Agent',
+        historicalConversation: 'History',
+        newConversation: 'New conversation',
+        conversationCount: '{{count}} conversations',
+        createAgent: 'Create new Agent',
+        editAgent: 'Edit Agent',
+        editAgentLoading: 'Loading...',
+        editAgentLoadFailed: 'Failed to load the Agent configuration',
         noConversations: 'No recent conversations',
         active: 'Active',
         startNew: 'Start a new conversation',
@@ -246,6 +306,18 @@ const resources = {
         input: 'Input',
         output: 'Output',
         solving: 'Solving the problem...',
+		running: 'Running',
+		researchProgress: 'Research progress',
+		researchQueries: 'Queries',
+		researchSources: 'Sources',
+		researchConfidence: 'Confidence',
+		researchValuablePages: 'Pages used for this answer',
+		researchValuablePagesHint: 'Athena opened, filtered, and ranked these pages before composing the answer.',
+		researchPageCount: '{{count}} pages',
+		researchEvidenceScore: 'Evidence',
+		researchValueSignals: { opened: 'Opened', authoritative: 'Authoritative', high_relevance: 'Highly relevant', recent: 'Recent', corroborated: 'Corroborated' },
+		researchStages: { intent: 'Intent', planning: 'Planning', planned: 'Plan ready', searching: 'Searching', ranking: 'Evidence ranking', gap_analysis: 'Gap analysis', verifying: 'Verification', synthesizing: 'Synthesis', complete: 'Complete' },
+		researchMessages: { intent: 'Understanding the research goal', planning: 'Refining search queries', planned: 'Search plan ready', searching: 'Searching across selected sources', ranking: 'Ranking and cross-checking evidence', gap_analysis: 'Checking evidence gaps and follow-up needs', verifying: 'Semantically verifying key claims', synthesizing: 'Preparing structured research context', complete: 'Research evidence is ready' },
 		localFolderAuthorize: 'Authorize a local folder',
 		localFolderAuthorized: 'Local folder authorized',
 		localFolderRemove: 'Remove folder authorization',
@@ -259,6 +331,23 @@ const resources = {
 		desktopActionCompleted: 'Desktop action {{action}} completed.',
 		desktopActionFailedDetail: 'Could not open {{target}}: {{message}}',
 		desktopDeviceBound: 'Athena Desktop is now bound to this account.',
+		browserSuggestedActions: 'Continue on this page',
+		browserSuggestedActionsHint: 'These actions run directly in the current browser session.',
+		browserActionSessionMissing: 'This browser session has expired. Open or observe the page again.',
+		browserActionSucceeded: 'Browser action completed.',
+		browserCurrentPage: 'Current page',
+		browserActionFailed: 'The browser action could not be completed.',
+		browserPlaybackVerified: 'Playback verified',
+		browserExecution: 'Browser execution',
+		browserStrategy: 'Strategy',
+		browserResolution: 'Target resolution',
+		browserBudget: 'Action budget',
+		browserSelectedTarget: 'Selected target',
+		browserNotResolved: 'Not resolved',
+		browserCapabilityHandoff: 'Resolving the exact URL through Search System',
+		browserInteractions: 'Verified interactions',
+		browserAutomation: 'Watch mode',
+		browserActiveRules: 'active rules',
 		executionError: 'Execution error',
 		generationStopped: 'Generation stopped.',
 		unknownError: 'Unknown error',
@@ -679,6 +768,8 @@ const resources = {
         latency: 'Avg Latency',
         context: 'Context Window',
         successRate: 'Success Rate',
+		usageLast24h: 'Usage (Last 24h)',
+		requestCount: '{{count}} requests',
         usage: 'Token Usage',
         tokens: 'Total Tokens',
         totalModels: 'Total Models',
@@ -814,6 +905,58 @@ const resources = {
         cancel: '取消',
         confirmDelete: '确认删除',
         deleteFailed: '删除失败'
+      },
+      auth: {
+        runtime: 'Agent 运行时',
+        language: '界面语言',
+        eyebrow: '个人 AI 操作系统',
+        mobileTitle: '从这里进入',
+        hero: {
+          models: '你的模型。',
+          agents: '你的 Agent。',
+          memory: '你的记忆。',
+          description: '每个账户拥有独立的模型凭据、Agent 和长期记忆。公共 Agent 保持开箱即用，你的私有配置始终相互隔离。'
+        },
+        features: {
+          isolation: '服务端资源隔离',
+          keys: 'API Key 不返回浏览器',
+          memory: '用户级长期记忆'
+        },
+        secureAccess: '安全访问',
+        privateSession: '加密的账户级会话',
+        modeLabel: '身份验证模式',
+        modes: {
+          login: '登录',
+          register: '创建账户'
+        },
+        login: {
+          title: '继续你的工作',
+          description: '登录后恢复你的 Agent、模型和工作空间。'
+        },
+        register: {
+          title: '建立你的独立空间',
+          description: '创建账户，然后绑定你希望使用的模型。'
+        },
+        fields: {
+          username: '用户名',
+          usernamePlaceholder: '输入用户名',
+          nickname: '昵称',
+          nicknamePlaceholder: 'Athena 应该如何称呼你',
+          password: '密码',
+          passwordPlaceholder: '至少 6 个字符',
+          showPassword: '显示密码',
+          hidePassword: '隐藏密码'
+        },
+        actions: {
+          login: '安全登录',
+          register: '创建并登录'
+        },
+        submitting: '正在连接…',
+        securityNote: '凭据只会发送到你的 Runtime Client；模型提供商和 Agent 都不会收到你的账户密码。',
+        footer: 'Athena 私有控制平面',
+        errors: {
+          generic: '身份验证失败，请重试。'
+        }
       },
       voiceCall: {
         simulatePerson: '真人虚拟人',
@@ -1035,6 +1178,14 @@ const resources = {
       chat: {
         downloadImage: '下载图片',
         history: '历史记录',
+        selectAgent: '选择 Agent',
+        historicalConversation: '历史会话',
+        newConversation: '新会话',
+        conversationCount: '{{count}} 个会话',
+        createAgent: '创建新 Agent',
+        editAgent: '编辑 Agent',
+        editAgentLoading: '加载中...',
+        editAgentLoadFailed: '加载 Agent 配置失败',
         noConversations: '没有最近的对话',
         active: '活跃',
         startNew: '开始新对话',
@@ -1048,6 +1199,18 @@ const resources = {
         input: '输入',
         output: '输出',
         solving: '正在解决问题中...',
+		running: '执行中',
+		researchProgress: '研究进度',
+		researchQueries: '查询',
+		researchSources: '来源',
+		researchConfidence: '置信度',
+		researchValuablePages: '本次回答参考的页面',
+		researchValuablePagesHint: 'Athena 在回答前实际打开、筛选并排序了这些页面。',
+		researchPageCount: '{{count}} 个页面',
+		researchEvidenceScore: '证据评分',
+		researchValueSignals: { opened: '已打开', authoritative: '权威来源', high_relevance: '高度相关', recent: '近期内容', corroborated: '交叉印证' },
+		researchStages: { intent: '理解意图', planning: '规划中', planned: '计划已就绪', searching: '搜索中', ranking: '证据排序', gap_analysis: '缺口分析', verifying: '语义核验', synthesizing: '整理结果', complete: '已完成' },
+		researchMessages: { intent: '正在理解研究目标', planning: '正在优化搜索查询', planned: '搜索计划已准备完成', searching: '正在从选定来源中搜索', ranking: '正在排序并交叉核对证据', gap_analysis: '正在检查证据缺口和补查需求', verifying: '正在语义核验关键主张', synthesizing: '正在生成结构化研究上下文', complete: '研究证据已准备完成' },
 		localFolderAuthorize: '授权本地目录',
 		localFolderAuthorized: '已授权本地目录',
 		localFolderRemove: '移除目录授权',
@@ -1060,6 +1223,23 @@ const resources = {
 		desktopActionSucceeded: '已打开 {{target}}。',
 		desktopActionCompleted: '桌面操作 {{action}} 已完成。',
 		desktopDeviceBound: 'Athena Desktop 已绑定到当前账号。',
+		browserSuggestedActions: '继续操作当前页面',
+		browserSuggestedActionsHint: '以下操作会直接在当前浏览器会话执行，不再交给模型重新猜测。',
+		browserActionSessionMissing: '浏览器会话已失效，请重新打开或观察页面。',
+		browserActionSucceeded: '浏览器操作已完成。',
+		browserCurrentPage: '当前页面',
+		browserActionFailed: '浏览器操作未能完成。',
+		browserPlaybackVerified: '已验证正在播放',
+		browserExecution: '浏览器执行过程',
+		browserStrategy: '执行策略',
+		browserResolution: '目标解析',
+		browserBudget: '动作预算',
+		browserSelectedTarget: '已选择目标',
+		browserNotResolved: '尚未解析',
+		browserCapabilityHandoff: '正在通过搜索系统解析准确网址',
+		browserInteractions: '已验证的交互',
+		browserAutomation: '监控模式',
+		browserActiveRules: '条活跃规则',
 		desktopActionFailedDetail: '无法打开 {{target}}：{{message}}',
 		executionError: '执行错误',
 		generationStopped: '已停止生成。',
@@ -1481,6 +1661,8 @@ const resources = {
         latency: '平均延迟',
         context: '上下文窗口',
         successRate: '成功率',
+		usageLast24h: '过去 24 小时用量',
+		requestCount: '{{count}} 次调用',
         usage: 'Token 使用情况',
         tokens: '总 Token 数',
         totalModels: '模型总数',
