@@ -50,7 +50,11 @@ import {
   Download,
   UserRound,
   Loader2,
-  KeyRound
+  KeyRound,
+  Globe2,
+  Sparkles,
+  Scale,
+  ListChecks
 } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 import { motion, AnimatePresence } from 'motion/react';
@@ -915,18 +919,163 @@ function isToolResultError(result: unknown, status?: string): boolean {
   return typeof result === 'string' && result.startsWith('错误:');
 }
 
+type AnswerReference = {
+  label: string;
+  url: string;
+  domain: string;
+};
+
+function referenceDomain(rawURL: string): string {
+  try {
+    return new URL(rawURL).hostname.replace(/^www\./i, '');
+  } catch {
+    return rawURL;
+  }
+}
+
+function isOfficialReference(domain: string): boolean {
+  const value = domain.toLowerCase();
+  return value.endsWith('.gov')
+    || value.includes('.gov.')
+    || value.endsWith('.go.jp')
+    || value.endsWith('.lg.jp')
+    || value.endsWith('.gouv.fr')
+    || value.endsWith('.gc.ca');
+}
+
+function extractAnswerReferences(content: string): AnswerReference[] {
+  const references: AnswerReference[] = [];
+  const seen = new Set<string>();
+  const markdownRanges: Array<[number, number]> = [];
+  const append = (rawLabel: string, rawURL: string) => {
+    const url = rawURL.trim().replace(/[),.;!?，。；！？]+$/, '');
+    if (!/^https?:\/\//i.test(url) || seen.has(url)) return;
+    seen.add(url);
+    const domain = referenceDomain(url);
+    const label = rawLabel.trim() || domain;
+    references.push({ label, url, domain });
+  };
+
+  const markdownLink = /\[([^\]]*)\]\((https?:\/\/[^)\s]+)(?:\s+"[^"]*")?\)/gi;
+  for (const match of content.matchAll(markdownLink)) {
+    if (typeof match.index === 'number') {
+      const image = match.index > 0 && content[match.index - 1] === '!';
+      markdownRanges.push([image ? match.index - 1 : match.index, match.index + match[0].length]);
+      if (image) continue;
+    }
+    append(match[1], match[2]);
+  }
+  const bareLink = /https?:\/\/[^\s<>()\]]+/gi;
+  for (const match of content.matchAll(bareLink)) {
+    if (typeof match.index === 'number' && markdownRanges.some(([start, end]) => match.index! >= start && match.index! < end)) continue;
+    append('', match[0]);
+  }
+  return references.slice(0, 12);
+}
+
+function ExternalReferenceLink({ href, children }: React.AnchorHTMLAttributes<HTMLAnchorElement>) {
+  if (!href || !/^https?:\/\//i.test(href)) {
+    return <a href={href} className="font-semibold text-brand-600 underline decoration-brand-200 underline-offset-2 hover:text-brand-700">{children}</a>;
+  }
+  const domain = referenceDomain(href);
+  const official = isOfficialReference(domain);
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      title={href}
+      className={cn(
+        'not-prose mx-0.5 inline-flex max-w-full items-center gap-1 rounded-md border px-1.5 py-0.5 align-baseline text-[0.92em] font-bold no-underline transition-colors',
+        official
+          ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-100 hover:text-emerald-800'
+          : 'border-sky-200 bg-sky-50 text-sky-700 hover:border-sky-300 hover:bg-sky-100 hover:text-sky-800',
+      )}
+    >
+      <Globe2 size={13} className="shrink-0" aria-hidden="true" />
+      <span className="min-w-0 break-all">{children}</span>
+      <ExternalLink size={11} className="shrink-0 opacity-60" aria-hidden="true" />
+    </a>
+  );
+}
+
+function ReferenceFollowUpActions({
+  references,
+  disabled,
+  onAsk,
+}: {
+  references: AnswerReference[];
+  disabled?: boolean;
+  onAsk?: (prompt: string, displayText: string) => void;
+}) {
+  const { t } = useTranslation();
+  if (!onAsk || references.length === 0) return null;
+  const first = references[0];
+  const sourceList = references.slice(0, 8).map((reference, index) => `${index + 1}. ${reference.label}: ${reference.url}`).join('\n');
+  const actions = [
+    {
+      key: 'read',
+      icon: Sparkles,
+      label: t('chat.referenceReadDeeply'),
+      prompt: t('chat.referencePrompts.read', { title: first.label, url: first.url }),
+    },
+    {
+      key: 'verify',
+      icon: Scale,
+      label: t('chat.referenceCrossCheck'),
+      prompt: t('chat.referencePrompts.verify', { sources: sourceList }),
+    },
+    {
+      key: 'checklist',
+      icon: ListChecks,
+      label: t('chat.referenceMakeChecklist'),
+      prompt: t('chat.referencePrompts.checklist', { sources: sourceList }),
+    },
+  ];
+
+  return (
+    <div className="not-prose mt-4 rounded-xl border border-sky-100 bg-gradient-to-r from-sky-50/80 to-emerald-50/60 p-3">
+      <div className="flex items-center gap-2 text-[10px] font-extrabold uppercase tracking-wider text-sky-800">
+        <Globe2 size={13} />
+        <span>{t('chat.referenceContinue')}</span>
+        <span className="rounded-full bg-white px-1.5 py-0.5 text-[9px] text-slate-500 ring-1 ring-sky-100">
+          {t('chat.referenceCount', { count: references.length })}
+        </span>
+      </div>
+      <p className="mt-1 text-[10px] leading-4 text-slate-500">{t('chat.referenceContinueHint')}</p>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {actions.map(action => {
+          const Icon = action.icon;
+          return (
+            <button
+              key={action.key}
+              type="button"
+              disabled={disabled}
+              onClick={() => onAsk(action.prompt, t('chat.referenceActionMessage', { action: action.label, source: first.label }))}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-white bg-white px-2.5 py-1.5 text-[10px] font-bold text-slate-700 shadow-sm transition-all hover:-translate-y-0.5 hover:border-sky-200 hover:text-sky-700 hover:shadow disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              <Icon size={12} /> {action.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // 渲染消息内容组件
-function MessageContent({ content, htmlContent, reportUrl, pptUrl, onClarificationAnswer }: { content: string; htmlContent?: string; reportUrl?: string; pptUrl?: string; onClarificationAnswer?: (answer: string) => void }) {
+function MessageContent({ content, htmlContent, reportUrl, pptUrl, onClarificationAnswer, onReferenceFollowUp, referenceActionsDisabled }: { content: string; htmlContent?: string; reportUrl?: string; pptUrl?: string; onClarificationAnswer?: (answer: string) => void; onReferenceFollowUp?: (prompt: string, displayText: string) => void; referenceActionsDisabled?: boolean }) {
   const { t } = useTranslation();
   const [iframeKey, setIframeKey] = React.useState(0);
   content = formatAssistantOutput(stripImagePlanningMarkup(stripInternalControlTags(sanitizeImageToolResult(content))));
+	const references = extractAnswerReferences(content);
 	const browserAuthentication = parseBrowserAuthenticationMessage(content);
   const clarification = parseClarificationMessage(content);
 
 	if (browserAuthentication) {
 		return (
 			<div className="space-y-3">
-				{browserAuthentication.prefix && <ReactMarkdown>{browserAuthentication.prefix}</ReactMarkdown>}
+				{browserAuthentication.prefix && <ReactMarkdown components={{ a: ExternalReferenceLink }}>{browserAuthentication.prefix}</ReactMarkdown>}
 				<BrowserAuthenticationCard data={browserAuthentication.data} onAnswer={onClarificationAnswer} />
 			</div>
 		);
@@ -935,7 +1084,7 @@ function MessageContent({ content, htmlContent, reportUrl, pptUrl, onClarificati
   if (clarification) {
     return (
       <div className="space-y-3">
-        {clarification.prefix && <ReactMarkdown>{clarification.prefix}</ReactMarkdown>}
+        {clarification.prefix && <ReactMarkdown components={{ a: ExternalReferenceLink }}>{clarification.prefix}</ReactMarkdown>}
         <ClarificationCard data={clarification.data} onAnswer={onClarificationAnswer} />
       </div>
     );
@@ -1046,19 +1195,23 @@ function MessageContent({ content, htmlContent, reportUrl, pptUrl, onClarificati
 
   // 否则渲染 Markdown
   return (
-    <div className="markdown-body prose prose-slate prose-sm max-w-none">
-      <ReactMarkdown components={{
-        img: ({ src, alt }) => (
-          <figure className="my-3 overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
-            <img src={src} alt={alt || 'Generated image'} className="h-auto w-full" referrerPolicy="no-referrer" />
-            {src && (
-              <a href={src} download target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-2 border-t border-slate-200 px-3 py-2 text-xs font-bold text-brand-600 hover:bg-white">
-                <Download size={14} /> {t('chat.downloadImage')}
-              </a>
-            )}
-          </figure>
-        ),
-      }}>{content}</ReactMarkdown>
+    <div className="w-full">
+      <div className="markdown-body prose prose-slate prose-sm max-w-none">
+        <ReactMarkdown components={{
+          a: ExternalReferenceLink,
+          img: ({ src, alt }) => (
+            <figure className="my-3 overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+              <img src={src} alt={alt || 'Generated image'} className="h-auto w-full" referrerPolicy="no-referrer" />
+              {src && (
+                <a href={src} download target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-2 border-t border-slate-200 px-3 py-2 text-xs font-bold text-brand-600 hover:bg-white">
+                  <Download size={14} /> {t('chat.downloadImage')}
+                </a>
+              )}
+            </figure>
+          ),
+        }}>{content}</ReactMarkdown>
+      </div>
+      <ReferenceFollowUpActions references={references} disabled={referenceActionsDisabled} onAsk={onReferenceFollowUp} />
     </div>
   );
 }
@@ -1245,6 +1398,16 @@ function isLegacyImageHistoryMarker(message: Message): boolean {
     && (message.content || '').includes(LEGACY_IMAGE_HISTORY_MARKER);
 }
 
+function executionPromptFromMessage(message: Message): string {
+  if (message.role !== 'user' || !message.metadata) return '';
+  try {
+    const metadata = JSON.parse(message.metadata);
+    return typeof metadata.executionPrompt === 'string' ? metadata.executionPrompt.trim() : '';
+  } catch {
+    return '';
+  }
+}
+
 // Build the conversation history (prior turns) replayed to the runtime, capped
 // to the most recent HISTORY_MAX_MESSAGES completed user/assistant messages.
 function buildRunHistory(messages: Message[]): RunHistoryMessage[] {
@@ -1269,7 +1432,8 @@ function buildRunHistory(messages: Message[]): RunHistoryMessage[] {
       continue;
     }
     if (m.role === 'assistant' && hasInvalidImagePlanningOutput(m)) continue;
-    const content = stripImagePlanningMarkup(sanitizeImageToolResult((m.content || '').trim())).trim();
+    const replayContent = executionPromptFromMessage(m) || (m.content || '').trim();
+    const content = stripImagePlanningMarkup(sanitizeImageToolResult(replayContent)).trim();
     if (!content) continue;
     history.push({ role: m.role, content });
     if (m.role === 'user') latestUserContent = content;
@@ -1315,6 +1479,22 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent, on
       voiceSendRef.current(text);
     },
   });
+	const localeVoices = React.useMemo(() => {
+		const normalized = voiceLanguage.toLowerCase().replace('_', '-');
+		const exact = voice.voices.filter(item => item.lang.toLowerCase().replace('_', '-') === normalized);
+		if (exact.length > 0) return exact;
+		const base = normalized.split('-')[0];
+		return voice.voices.filter(item => item.lang.toLowerCase().replace('_', '-').split('-')[0] === base);
+	}, [voice.voices, voiceLanguage]);
+	const changeVoiceLanguage = React.useCallback((nextLanguage: string) => {
+		setVoiceLanguage(nextLanguage);
+		const normalized = nextLanguage.toLowerCase().replace('_', '-');
+		const exactVoice = voice.voices.find(item => item.lang.toLowerCase().replace('_', '-') === normalized);
+		const base = normalized.split('-')[0];
+		const fallbackVoice = voice.voices.find(item => item.lang.toLowerCase().replace('_', '-').split('-')[0] === base);
+		const nextVoice = exactVoice || fallbackVoice;
+		if (nextVoice) voice.setSelectedVoiceURI(nextVoice.voiceURI);
+	}, [voice]);
 	React.useEffect(() => {
 		localStorage.setItem('chat.voice.language', voiceLanguage);
 	}, [voiceLanguage]);
@@ -1409,6 +1589,8 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent, on
   const [currentSession, setCurrentSession] = React.useState<ChatSession | null>(null);
   const [isAgentMenuOpen, setIsAgentMenuOpen] = React.useState(false);
   const [isVoiceSettingsOpen, setIsVoiceSettingsOpen] = React.useState(false);
+  const voiceSettingsPanelRef = React.useRef<HTMLDivElement | null>(null);
+  const voiceSettingsTriggerRef = React.useRef<HTMLButtonElement | null>(null);
   const [searchQuery, setSearchQuery] = React.useState('');
   const [isSidebarOpen, setIsSidebarOpen] = React.useState(true);
   const [isTraceOpen, setIsTraceOpen] = React.useState(false);
@@ -1420,6 +1602,26 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent, on
   const abortControllerRef = React.useRef<AbortController | null>(null);
   const checkpointIdRef = React.useRef<string | null>(null);
   const userInitiatedStopRef = React.useRef(false);
+
+  React.useEffect(() => {
+    if (!isVoiceSettingsOpen) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (voiceSettingsPanelRef.current?.contains(target)) return;
+      if (voiceSettingsTriggerRef.current?.contains(target)) return;
+      setIsVoiceSettingsOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setIsVoiceSettingsOpen(false);
+    };
+    document.addEventListener('pointerdown', closeOnOutsidePointer, true);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsidePointer, true);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [isVoiceSettingsOpen]);
 
   // Load agents from backend
   React.useEffect(() => {
@@ -1605,10 +1807,12 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent, on
     noClick: true
   } as any);
 
-  const handleSend = async (voiceText?: string, options: { hidden?: boolean; sessionId?: string } = {}) => {
+  const handleSend = async (voiceText?: string, options: { hidden?: boolean; sessionId?: string; displayText?: string } = {}) => {
 	const hidden = options.hidden === true;
     const currentFiles = hidden ? [] : filesRef.current;
     const messageText = typeof voiceText === 'string' ? voiceText.trim() : inputRef.current.trim();
+	const displayText = options.displayText?.trim() || messageText;
+	const executionMetadata = displayText !== messageText ? JSON.stringify({ executionPrompt: messageText }) : undefined;
     console.log('[handleSend] called, currentFiles:', currentFiles, 'input:', messageText);
     if ((!messageText && currentFiles.length === 0) || (!hidden && isLoading) || !activeAgent) return;
 	if (!hidden) {
@@ -1616,12 +1820,13 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent, on
 		if (voice.isSpeaking) voice.stopSpeaking();
 	}
 
-    const userMessage: Message = {
+	    const userMessage: Message = {
       id: Date.now().toString(),
       role: 'user',
-      content: messageText,
-      timestamp: new Date(),
-      files: [...currentFiles]
+	      content: displayText,
+	      timestamp: new Date(),
+	      files: [...currentFiles],
+	      metadata: executionMetadata,
     };
 
 	if (!hidden) {
@@ -1642,7 +1847,7 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent, on
       let sessionId = options.sessionId || currentSession?.ulid || activeConversationId;
       console.log('[handleSend] sessionId:', sessionId, 'currentFiles:', currentFiles.length);
       // Use first 50 chars of input as session title
-      const sessionTitle = messageText.length > 50 ? messageText.substring(0, 50) + '...' : messageText;
+	      const sessionTitle = displayText.length > 50 ? displayText.substring(0, 50) + '...' : displayText;
       if (!sessionId) {
         const result = await chatApi.createSession({
 		  user_id: currentUserId,
@@ -1710,13 +1915,17 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent, on
       let userMessageUlid: string | null = null;
 		if (!hidden) {
 			try {
-				const filesJson = filesToSend.length > 0 ? JSON.stringify(filesToSend) : undefined;
-				const userMsgResult = await chatApi.createMessage({
+					const filesJson = filesToSend.length > 0 ? JSON.stringify(filesToSend) : undefined;
+					const metadata = executionMetadata
+						? JSON.stringify({ executionPrompt: messageText, ...(filesToSend.length > 0 ? { files: filesToSend } : {}) })
+						: undefined;
+					const userMsgResult = await chatApi.createMessage({
 					session_id: sessionId,
 					role: 'user',
-					content: messageText,
-					status: 'completed',
-					files: filesJson
+						content: displayText,
+						status: 'completed',
+						metadata,
+						files: filesJson
 				});
 				userMessageUlid = userMsgResult.ulid;
 			} catch (err) {
@@ -2092,6 +2301,8 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent, on
         setIsLoading(false);
         if ((voice.autoSpeak || voice.conversationMode) && completedContent.trim()) {
           voice.speak(completedContent, voice.conversationMode);
+        } else if (voice.conversationMode) {
+          voice.resumeListening();
         }
         return
       }
@@ -2162,11 +2373,13 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent, on
         console.error('Failed to save assistant message:', err);
       }
       if (voice.autoSpeak || voice.conversationMode) {
-        voice.speak(assistantMessageRaw, voice.conversationMode);
+        if (assistantMessageRaw.trim()) voice.speak(assistantMessageRaw, voice.conversationMode);
+        else if (voice.conversationMode) voice.resumeListening();
       }
     } catch (error: any) {
       if (error.name === 'AbortError' || userInitiatedStopRef.current) {
         console.log("Generation stopped by user");
+        if (voice.conversationMode) voice.resumeListening();
         return;
       }
       console.error("Runner Error:", error);
@@ -2177,9 +2390,10 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent, on
 		content: `${t('chat.executionError')}: ${detail}`,
         timestamp: new Date()
       };
-	  setMessages(prev => activeAssistantMessageId
-		? prev.map(message => message.id === activeAssistantMessageId ? { ...message, content: errorMessage.content, status: 'failed' } : message)
-		: [...prev, errorMessage]);
+      setMessages(prev => activeAssistantMessageId
+        ? prev.map(message => message.id === activeAssistantMessageId ? { ...message, content: errorMessage.content, status: 'failed' } : message)
+        : [...prev, errorMessage]);
+      if (voice.conversationMode) voice.resumeListening();
     } finally {
       setIsLoading(false);
       abortControllerRef.current = null;
@@ -2765,11 +2979,13 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent, on
                             </div>
                           )}
 						  {isResearch && tool.researchPages && tool.researchPages.length > 0 && (
-							<ResearchSourcesPanel
-							  pages={tool.researchPages}
-							  queryTexts={tool.researchQueryTexts}
-							  confidence={tool.researchConfidence}
-							/>
+								<ResearchSourcesPanel
+								  pages={tool.researchPages}
+								  queryTexts={tool.researchQueryTexts}
+								  confidence={tool.researchConfidence}
+								  disabled={isLoading}
+								  onAsk={(prompt, displayText) => void handleSend(prompt, { displayText })}
+								/>
 						  )}
 						  {tool.suggestedActions && tool.suggestedActions.length > 0 && (
 							<div className="border-t border-slate-100 bg-white px-3 py-3">
@@ -2840,6 +3056,10 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent, on
                         reportUrl={msg.reportUrl}
                         pptUrl={msg.pptUrl}
                         onClarificationAnswer={answer => void handleSend(answer)}
+						referenceActionsDisabled={isLoading}
+						onReferenceFollowUp={msg.toolCalls?.some(tool => tool.name === 'research.execute' && (tool.researchPages?.length || 0) > 0)
+						  ? undefined
+						  : (prompt, displayText) => void handleSend(prompt, { displayText })}
                       />
                     )
                   ) : (
@@ -2947,7 +3167,9 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent, on
                   {msg.role === 'assistant' && msg.status !== 'streaming' && msg.content && (
                     <button
                       type="button"
-                      onClick={() => voice.isSpeaking ? voice.stopSpeaking() : voice.speak(msg.content)}
+                      onClick={() => voice.isSpeaking
+                        ? voice.stopSpeaking(voice.conversationMode)
+                        : voice.speak(msg.content, voice.conversationMode)}
                       className={cn(
                         "p-1 rounded-md transition-colors",
                         voice.isSpeaking ? "text-emerald-600 bg-emerald-50" : "text-slate-400 hover:text-slate-700 hover:bg-slate-100"
@@ -3053,8 +3275,8 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent, on
               speakingText={voice.speakingText}
               voiceError={voice.voiceError}
               agentName={activeAgent?.name}
-              onToggleMic={() => (voice.isListening ? voice.stopListening() : voice.startListening())}
-              onStopSpeaking={voice.stopSpeaking}
+              onToggleMic={() => (voice.isListening ? voice.pauseListening() : voice.startListening())}
+              onStopSpeaking={() => voice.stopSpeaking(voice.conversationMode)}
               onEndCall={() => {
                 voice.setConversationMode(false);
 				voice.stopAll();
@@ -3129,6 +3351,7 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent, on
               <AnimatePresence>
                 {isVoiceSettingsOpen && (
                   <motion.div
+                    ref={voiceSettingsPanelRef}
                     initial={{ opacity: 0, y: 8, scale: 0.98 }}
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: 8, scale: 0.98 }}
@@ -3149,7 +3372,7 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent, on
 						<span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{t('voiceCall.languageLabel')}</span>
 						<select
 						  value={voiceLanguage}
-						  onChange={event => setVoiceLanguage(event.target.value)}
+						  onChange={event => changeVoiceLanguage(event.target.value)}
 						  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 outline-none focus:border-emerald-400"
 						>
 						  <option value="en-US">English (United States)</option>
@@ -3229,8 +3452,8 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent, on
                           onChange={event => voice.setSelectedVoiceURI(event.target.value)}
                           className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 outline-none focus:border-emerald-400"
                         >
-						  {voice.voices.length === 0 && <option value="">{t('voiceCall.systemDefaultVoice')}</option>}
-                          {voice.voices.map(item => {
+						  {localeVoices.length === 0 && <option value="">{t('voiceCall.systemDefaultVoice')}</option>}
+                          {localeVoices.map(item => {
                             const highQuality = /natural|neural|premium|enhanced|高质量/i.test(item.name);
                             return (
                               <option key={item.voiceURI} value={item.voiceURI}>
@@ -3291,7 +3514,9 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent, on
 
                       <button
                         type="button"
-						onClick={() => voice.isSpeaking ? voice.stopSpeaking() : voice.speak(t('voiceCall.previewText'))}
+                        onClick={() => voice.isSpeaking
+                          ? voice.stopSpeaking(voice.conversationMode)
+                          : voice.speak(t('voiceCall.previewText'), voice.conversationMode)}
                         className="w-full flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-600 transition-colors"
                       >
                         <Volume2 size={14} />
@@ -3327,7 +3552,7 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent, on
 						toast.error(t('voiceCall.unsupportedRecognition'));
                         return;
                       }
-                      if (voice.isListening) voice.stopListening();
+                      if (voice.isListening) voice.pauseListening();
                       else voice.startListening();
                     }}
                     disabled={!activeAgent || agents.length === 0 || isLoading}
@@ -3378,7 +3603,7 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent, on
 						toast.error(t('voiceCall.unsupportedSynthesis'));
                         return;
                       }
-                      if (voice.isSpeaking) voice.stopSpeaking();
+                      if (voice.isSpeaking) voice.stopSpeaking(voice.conversationMode);
                       voice.setAutoSpeak(!voice.autoSpeak);
                     }}
                     className={cn(
@@ -3391,6 +3616,7 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent, on
                   </button>
 
                   <button
+                    ref={voiceSettingsTriggerRef}
                     type="button"
                     onClick={() => {
                       if (!voice.synthesisSupported) {

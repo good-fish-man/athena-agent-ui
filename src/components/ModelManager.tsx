@@ -59,6 +59,13 @@ function formatCapacity(bytes: number) {
   return `${value >= 100 ? value.toFixed(0) : value.toFixed(1).replace(/\.0$/, '')} ${units[unitIndex]}`;
 }
 
+function formatTokenCount(value: number) {
+	return new Intl.NumberFormat(undefined, {
+		notation: value >= 1000 ? 'compact' : 'standard',
+		maximumFractionDigits: 1,
+	}).format(value || 0);
+}
+
 export function ModelManager() {
   const { t } = useTranslation();
 	const currentUserId = authStore.userID();
@@ -80,6 +87,9 @@ export function ModelManager() {
 	const [editingKeyId, setEditingKeyId] = React.useState<string | null>(null);
 
   const [models, setModels] = React.useState<Model[]>([]);
+	const visibleLLMTokenTotal = models
+		.filter(model => model.type === 'llm')
+		.reduce((total, model) => total + (model.totalTokens || 0), 0);
 
   const loadModels = React.useCallback(async () => {
     try {
@@ -103,6 +113,9 @@ export function ModelManager() {
 		usageRate: m.usageRate || 0,
 		usageCount: m.usageCount || 0,
 		successRate: m.successRate || 0,
+		inputTokens: m.inputTokens || 0,
+		outputTokens: m.outputTokens || 0,
+		totalTokens: m.totalTokens || 0,
         type: m.modelType as 'llm' | 'embedding' | 'image' | 'video',
 		capabilities: m.capabilities || '',
 		category: m.category as 'default' | 'rewrite' | 'skill' | 'summarize' | undefined,
@@ -555,6 +568,22 @@ export function ModelManager() {
               </div>
 
               <div className="space-y-2">
+				{model.type === 'llm' && (
+				  <div className="mb-4 grid grid-cols-3 gap-2">
+					<div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2" title={(model.totalTokens || 0).toLocaleString()}>
+					  <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">{t('models.totalTokens24h')}</p>
+					  <p className="mt-1 text-sm font-extrabold text-slate-800">{formatTokenCount(model.totalTokens || 0)}</p>
+					</div>
+					<div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2" title={(model.inputTokens || 0).toLocaleString()}>
+					  <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">{t('models.inputTokens')}</p>
+					  <p className="mt-1 text-sm font-extrabold text-sky-700">{formatTokenCount(model.inputTokens || 0)}</p>
+					</div>
+					<div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2" title={(model.outputTokens || 0).toLocaleString()}>
+					  <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">{t('models.outputTokens')}</p>
+					  <p className="mt-1 text-sm font-extrabold text-emerald-700">{formatTokenCount(model.outputTokens || 0)}</p>
+					</div>
+				  </div>
+				)}
                 <div className="flex justify-between text-[10px] font-bold text-slate-400 uppercase">
 				  <span>{t('models.usageLast24h')}</span>
 				  <span>{t('models.requestCount', { count: model.usageCount || 0 })} · {(model.usageRate || 0).toFixed(2)}%</span>
@@ -608,6 +637,10 @@ export function ModelManager() {
                 <span className="text-sm text-slate-500">{t('models.totalModels')}</span>
                 <span className="text-sm font-bold text-slate-900">{models.length}</span>
               </div>
+			  <div className="flex items-center justify-between">
+				<span className="text-sm text-slate-500">{t('models.totalTokens24h')}</span>
+				<span className="text-sm font-bold text-slate-900" title={visibleLLMTokenTotal.toLocaleString()}>{formatTokenCount(visibleLLMTokenTotal)}</span>
+			  </div>
             </div>
           </div>
 

@@ -264,6 +264,9 @@ export interface Model {
 	usageRate?: number;
 	usageCount?: number;
 	successRate?: number;
+	inputTokens?: number;
+	outputTokens?: number;
+	totalTokens?: number;
   type: 'llm' | 'embedding' | 'image' | 'video';
   capabilities?: string;
   category?: 'default' | 'rewrite' | 'skill' | 'summarize';

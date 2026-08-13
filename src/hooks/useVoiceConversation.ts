@@ -81,6 +81,17 @@ function microphonePermissionError(language?: string) {
     : 'Microphone access was denied. Allow it in your browser settings.';
 }
 
+const FATAL_RECOGNITION_ERRORS = new Set([
+  'audio-capture',
+  'language-not-supported',
+  'not-allowed',
+  'service-not-allowed',
+]);
+
+function isFatalRecognitionError(error: string) {
+  return FATAL_RECOGNITION_ERRORS.has(error);
+}
+
 function voiceQualityScore(voice: SpeechSynthesisVoice, language: string) {
   const name = voice.name.toLowerCase();
   let score = voice.lang.toLowerCase().startsWith(language.split('-')[0].toLowerCase()) ? 100 : 0;
@@ -88,6 +99,23 @@ function voiceQualityScore(voice: SpeechSynthesisVoice, language: string) {
   if (/xiaoxiao|xiaoyi|yunxi|tingting|meijia|sinji|siri|google/.test(name)) score += 10;
   if (voice.localService) score += 2;
   return score;
+}
+
+function normalizedLocale(value: string) {
+  return value.trim().replace('_', '-').toLowerCase();
+}
+
+function voiceForSelection(
+  available: SpeechSynthesisVoice[],
+  selectedVoiceURI: string,
+  language: string,
+) {
+  const locale = normalizedLocale(language);
+  const languageBase = locale.split('-')[0];
+  return available.find(voice => voice.voiceURI === selectedVoiceURI)
+    || available.find(voice => normalizedLocale(voice.lang) === locale)
+    || available.find(voice => normalizedLocale(voice.lang).split('-')[0] === languageBase)
+    || available[0];
 }
 
 export const AVATAR_PRESETS = [
@@ -115,7 +143,7 @@ export function useVoiceConversation({ onTranscript, onFinalTranscript, language
   const [speakingText, setSpeakingText] = React.useState('');
   const [voiceError, setVoiceError] = React.useState('');
   const [autoSpeak, setAutoSpeak] = React.useState(() => localStorage.getItem('chat.voice.autoSpeak') === 'true');
-  const [conversationMode, setConversationMode] = React.useState(() => localStorage.getItem('chat.voice.conversationMode') === 'true');
+  const [conversationMode, setConversationModeState] = React.useState(() => localStorage.getItem('chat.voice.conversationMode') === 'true');
   const [avatarEnabled, setAvatarEnabled] = React.useState(() => localStorage.getItem('chat.voice.avatarEnabled') !== 'false');
   const [avatarId, setAvatarId] = React.useState<SelectedAvatarId>(storedAvatarId);
   const [voices, setVoices] = React.useState<SpeechSynthesisVoice[]>([]);
@@ -127,8 +155,18 @@ export function useVoiceConversation({ onTranscript, onFinalTranscript, language
   const restartTimerRef = React.useRef<number | null>(null);
   const silenceTimerRef = React.useRef<number | null>(null);
   const intentionalStopRef = React.useRef(false);
+  const manualPauseRef = React.useRef(false);
   const submittedRef = React.useRef(false);
   const recognitionErrorRef = React.useRef('');
+  const restartAttemptRef = React.useRef(0);
+  const speechRunRef = React.useRef(0);
+  const voicesRef = React.useRef<SpeechSynthesisVoice[]>([]);
+  const selectedVoiceURIRef = React.useRef(selectedVoiceURI);
+  const languageRef = React.useRef(language || (typeof navigator !== 'undefined' ? navigator.language : 'zh-CN'));
+  const speechRateRef = React.useRef(speechRate);
+  const speechPitchRef = React.useRef(speechPitch);
+  const activeSpeechRef = React.useRef<{ remainingText: string; resumeConversation: boolean } | null>(null);
+  const speakRef = React.useRef<(text: string, resumeConversation?: boolean) => void>(() => {});
   const finalTranscriptRef = React.useRef('');
   const currentTranscriptRef = React.useRef('');
   const conversationModeRef = React.useRef(conversationMode);
@@ -161,16 +199,28 @@ export function useVoiceConversation({ onTranscript, onFinalTranscript, language
   }, [avatarId]);
 
   React.useEffect(() => {
+    languageRef.current = language || navigator.language || 'zh-CN';
+  }, [language]);
+
+  React.useEffect(() => {
     if (!synthesisSupported) return;
     const loadVoices = () => {
       const available = [...window.speechSynthesis.getVoices()];
       const locale = language || navigator.language || 'zh-CN';
       available.sort((a, b) => voiceQualityScore(b, locale) - voiceQualityScore(a, locale) || a.name.localeCompare(b.name));
+      voicesRef.current = available;
       setVoices(available);
       setSelectedVoiceURI(current => {
+		const normalizedTarget = normalizedLocale(locale);
 		const currentVoice = available.find(voice => voice.voiceURI === current);
-		if (currentVoice && currentVoice.lang.toLowerCase().startsWith(locale.split('-')[0].toLowerCase())) return current;
-        return available[0]?.voiceURI || '';
+		if (currentVoice && normalizedLocale(currentVoice.lang) === normalizedTarget) {
+		  selectedVoiceURIRef.current = current;
+		  return current;
+		}
+		const nextVoice = voiceForSelection(available, '', locale);
+		const nextVoiceURI = nextVoice?.voiceURI || '';
+		selectedVoiceURIRef.current = nextVoiceURI;
+		return nextVoiceURI;
       });
     };
     loadVoices();
@@ -179,14 +229,17 @@ export function useVoiceConversation({ onTranscript, onFinalTranscript, language
   }, [language, synthesisSupported]);
 
   React.useEffect(() => {
+    selectedVoiceURIRef.current = selectedVoiceURI;
     localStorage.setItem('chat.voice.voiceURI', selectedVoiceURI);
   }, [selectedVoiceURI]);
 
   React.useEffect(() => {
+    speechRateRef.current = speechRate;
     localStorage.setItem('chat.voice.rate', String(speechRate));
   }, [speechRate]);
 
   React.useEffect(() => {
+    speechPitchRef.current = speechPitch;
     localStorage.setItem('chat.voice.pitch', String(speechPitch));
   }, [speechPitch]);
 
@@ -194,27 +247,58 @@ export function useVoiceConversation({ onTranscript, onFinalTranscript, language
     localStorage.setItem('chat.voice.silenceTimeoutMs', String(silenceTimeoutMs));
   }, [silenceTimeoutMs]);
 
-  const stopListening = React.useCallback(() => {
+  const scheduleListeningRestart = React.useCallback((delayMs = 350) => {
+    if (!conversationModeRef.current || manualPauseRef.current) return;
+    if (restartTimerRef.current !== null) window.clearTimeout(restartTimerRef.current);
+    restartTimerRef.current = window.setTimeout(() => {
+      restartTimerRef.current = null;
+      if (!conversationModeRef.current || manualPauseRef.current || recognitionRef.current) return;
+      startListeningRef.current();
+    }, delayMs);
+  }, []);
+
+  const setConversationMode = React.useCallback((enabled: boolean) => {
+    conversationModeRef.current = enabled;
+    manualPauseRef.current = false;
+    restartAttemptRef.current = 0;
+    if (!enabled && restartTimerRef.current !== null) {
+      window.clearTimeout(restartTimerRef.current);
+      restartTimerRef.current = null;
+    }
+    setConversationModeState(enabled);
+  }, []);
+
+  const stopListening = React.useCallback((pauseConversation = false) => {
     intentionalStopRef.current = true;
+    if (pauseConversation) manualPauseRef.current = true;
     if (restartTimerRef.current !== null) window.clearTimeout(restartTimerRef.current);
     if (silenceTimerRef.current !== null) window.clearTimeout(silenceTimerRef.current);
     restartTimerRef.current = null;
     silenceTimerRef.current = null;
-    recognitionRef.current?.abort?.();
+    const recognition = recognitionRef.current;
     recognitionRef.current = null;
+    recognition?.abort?.();
     setIsListening(false);
   }, []);
 
-  const stopSpeaking = React.useCallback(() => {
+  const pauseListening = React.useCallback(() => {
+    stopListening(true);
+  }, [stopListening]);
+
+  const stopSpeaking = React.useCallback((resumeConversation = false) => {
+    speechRunRef.current += 1;
     if (synthesisSupported) window.speechSynthesis.cancel();
+    activeSpeechRef.current = null;
     setIsSpeaking(false);
     setSpeakingText('');
-  }, [synthesisSupported]);
+    if (resumeConversation) scheduleListeningRestart(300);
+  }, [scheduleListeningRestart, synthesisSupported]);
 
   const startListening = React.useCallback(() => {
     const Recognition = recognitionConstructor();
-    if (!Recognition || isListening) return;
+    if (!Recognition || recognitionRef.current) return;
     stopSpeaking();
+    manualPauseRef.current = false;
     intentionalStopRef.current = false;
     recognitionErrorRef.current = '';
     setVoiceError('');
@@ -244,8 +328,15 @@ export function useVoiceConversation({ onTranscript, onFinalTranscript, language
       if (silenceTimerRef.current !== null) window.clearTimeout(silenceTimerRef.current);
       silenceTimerRef.current = window.setTimeout(submitTranscript, silenceTimeoutMs);
     };
-    recognition.onstart = () => setIsListening(true);
+    recognition.onstart = () => {
+      if (recognitionRef.current !== recognition) return;
+      setVoiceError('');
+      setIsListening(true);
+    };
     recognition.onresult = (event: any) => {
+      if (recognitionRef.current !== recognition) return;
+      restartAttemptRef.current = 0;
+      recognitionErrorRef.current = '';
       let interim = '';
       for (let index = event.resultIndex; index < event.results.length; index += 1) {
         const transcript = event.results[index][0]?.transcript || '';
@@ -258,18 +349,19 @@ export function useVoiceConversation({ onTranscript, onFinalTranscript, language
       scheduleTranscript();
     };
     recognition.onerror = (event: any) => {
-      recognitionErrorRef.current = event.error || 'unknown';
-      if (event.error === 'aborted' || event.error === 'no-speech') return;
-		if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-			intentionalStopRef.current = true;
-		}
-		const permissionDenied = event.error === 'not-allowed' || event.error === 'service-not-allowed';
+      if (recognitionRef.current !== recognition) return;
+      const errorCode = event.error || 'unknown';
+      recognitionErrorRef.current = errorCode;
+      if (errorCode === 'aborted' || errorCode === 'no-speech') return;
+      if (isFatalRecognitionError(errorCode)) intentionalStopRef.current = true;
+      const permissionDenied = errorCode === 'not-allowed' || errorCode === 'service-not-allowed';
       const message = permissionDenied
-		? microphonePermissionError(language)
-		: localizedVoiceError(language, `Speech recognition failed: ${event.error || 'unknown error'}`, `语音识别失败：${event.error || '未知错误'}`);
+        ? microphonePermissionError(language)
+        : localizedVoiceError(language, `Speech recognition failed: ${errorCode}`, `语音识别失败：${errorCode}`);
       setVoiceError(message);
     };
     recognition.onend = () => {
+      if (recognitionRef.current !== recognition) return;
       recognitionRef.current = null;
       setIsListening(false);
       if (submittedRef.current || intentionalStopRef.current) {
@@ -280,9 +372,16 @@ export function useVoiceConversation({ onTranscript, onFinalTranscript, language
         scheduleTranscript();
         return;
       }
-      const restartableError = !recognitionErrorRef.current || recognitionErrorRef.current === 'no-speech';
-      if (!finalText && conversationModeRef.current && !intentionalStopRef.current && restartableError) {
-        restartTimerRef.current = window.setTimeout(() => startListeningRef.current(), 350);
+      const errorCode = recognitionErrorRef.current;
+      const restartableError = !isFatalRecognitionError(errorCode);
+      if (!finalText && conversationModeRef.current && !manualPauseRef.current && !intentionalStopRef.current && restartableError) {
+        const transientFailure = Boolean(errorCode && errorCode !== 'no-speech');
+        if (transientFailure) restartAttemptRef.current = Math.min(restartAttemptRef.current + 1, 5);
+        else restartAttemptRef.current = 0;
+        const delay = transientFailure
+          ? Math.min(500 * (2 ** Math.max(0, restartAttemptRef.current - 1)), 4000)
+          : 350;
+        scheduleListeningRestart(delay);
       }
     };
     recognitionRef.current = recognition;
@@ -291,9 +390,13 @@ export function useVoiceConversation({ onTranscript, onFinalTranscript, language
     } catch {
       recognitionRef.current = null;
       setIsListening(false);
-		setVoiceError(localizedVoiceError(language, 'Unable to start speech recognition. Please try again.', '无法启动语音识别，请稍后重试。'));
+      setVoiceError(localizedVoiceError(language, 'Unable to start speech recognition. Retrying shortly.', '无法启动语音识别，正在稍后重试。'));
+      if (conversationModeRef.current && !manualPauseRef.current) {
+        restartAttemptRef.current = Math.min(restartAttemptRef.current + 1, 5);
+        scheduleListeningRestart(Math.min(500 * (2 ** Math.max(0, restartAttemptRef.current - 1)), 4000));
+      }
     }
-  }, [isListening, language, silenceTimeoutMs, stopSpeaking]);
+  }, [language, scheduleListeningRestart, silenceTimeoutMs, stopSpeaking]);
 
   startListeningRef.current = startListening;
 
@@ -305,46 +408,81 @@ export function useVoiceConversation({ onTranscript, onFinalTranscript, language
     const chunks = speechChunks(text);
     if (chunks.length === 0) return;
     stopListening();
+    const speechRun = speechRunRef.current + 1;
+    speechRunRef.current = speechRun;
     window.speechSynthesis.cancel();
     setVoiceError('');
     setIsSpeaking(true);
     setSpeakingText(speechText(text));
+	activeSpeechRef.current = { remainingText: chunks.join(' '), resumeConversation };
 
-    const locale = language || navigator.language || 'zh-CN';
-    const selectedVoice = voices.find(voice => voice.voiceURI === selectedVoiceURI)
-      || voices.find(voice => voice.lang.toLowerCase() === locale.toLowerCase())
-      || voices.find(voice => voice.lang.toLowerCase().startsWith(locale.split('-')[0].toLowerCase()));
     let index = 0;
     const playNext = () => {
+      if (speechRunRef.current !== speechRun) return;
       if (index >= chunks.length) {
+        activeSpeechRef.current = null;
         setIsSpeaking(false);
         setSpeakingText('');
         if (resumeConversation && conversationModeRef.current) {
           // Leave enough time for the speaker tail to decay before reopening the mic.
-          window.setTimeout(() => startListeningRef.current(), 700);
+          scheduleListeningRestart(700);
         }
         return;
       }
+	  activeSpeechRef.current = {
+		remainingText: chunks.slice(index).join(' '),
+		resumeConversation,
+	  };
       const utterance = new SpeechSynthesisUtterance(chunks[index]);
       index += 1;
-      utterance.lang = locale;
-      utterance.rate = speechRate;
-      utterance.pitch = speechPitch;
+	  // Resolve a fresh system voice for every chunk. WebKit can replace voice
+	  // objects after `voiceschanged`, and stale objects may silently fall back.
+	  const currentVoices = [...window.speechSynthesis.getVoices()];
+	  if (currentVoices.length > 0) voicesRef.current = currentVoices;
+	  const locale = languageRef.current || navigator.language || 'zh-CN';
+	  const selectedVoice = voiceForSelection(voicesRef.current, selectedVoiceURIRef.current, locale);
+	  utterance.rate = speechRateRef.current;
+	  utterance.pitch = speechPitchRef.current;
       if (selectedVoice) utterance.voice = selectedVoice;
+	  utterance.lang = selectedVoice?.lang || locale;
       utterance.onend = playNext;
       utterance.onerror = () => {
+        if (speechRunRef.current !== speechRun) return;
+		activeSpeechRef.current = null;
         setIsSpeaking(false);
         setSpeakingText('');
 		setVoiceError(localizedVoiceError(language, 'Speech playback failed.', '语音朗读失败。'));
+        if (resumeConversation) scheduleListeningRestart(700);
       };
       window.speechSynthesis.speak(utterance);
     };
     playNext();
-  }, [language, selectedVoiceURI, speechPitch, speechRate, stopListening, synthesisSupported, voices]);
+  }, [language, scheduleListeningRestart, stopListening, synthesisSupported]);
+
+  speakRef.current = speak;
+
+  const selectVoice = React.useCallback((voiceURI: string) => {
+	selectedVoiceURIRef.current = voiceURI;
+	setSelectedVoiceURI(voiceURI);
+	localStorage.setItem('chat.voice.voiceURI', voiceURI);
+	const activeSpeech = activeSpeechRef.current;
+	if (!activeSpeech || !synthesisSupported) return;
+	// A running SpeechSynthesisUtterance cannot change voices in place. Cancel
+	// the active run and rebuild it with the new voice immediately.
+	speechRunRef.current += 1;
+	window.speechSynthesis.cancel();
+	window.setTimeout(() => speakRef.current(activeSpeech.remainingText, activeSpeech.resumeConversation), 0);
+  }, [synthesisSupported]);
+
+  const resumeListening = React.useCallback((delayMs = 500) => {
+    scheduleListeningRestart(delayMs);
+  }, [scheduleListeningRestart]);
 
 	const stopAll = React.useCallback(() => {
 		stopListening();
 		stopSpeaking();
+		manualPauseRef.current = false;
+		restartAttemptRef.current = 0;
 		recognitionErrorRef.current = '';
 		finalTranscriptRef.current = '';
 		currentTranscriptRef.current = '';
@@ -355,6 +493,7 @@ export function useVoiceConversation({ onTranscript, onFinalTranscript, language
     intentionalStopRef.current = true;
     if (restartTimerRef.current !== null) window.clearTimeout(restartTimerRef.current);
     if (silenceTimerRef.current !== null) window.clearTimeout(silenceTimerRef.current);
+    speechRunRef.current += 1;
     recognitionRef.current?.abort?.();
     if (synthesisSupported) window.speechSynthesis.cancel();
   }, [synthesisSupported]);
@@ -379,12 +518,14 @@ export function useVoiceConversation({ onTranscript, onFinalTranscript, language
     setConversationMode,
     setAvatarEnabled,
     setAvatarId,
-    setSelectedVoiceURI,
+    setSelectedVoiceURI: selectVoice,
     setSpeechRate,
     setSpeechPitch,
     setSilenceTimeoutMs,
     startListening,
     stopListening,
+    pauseListening,
+    resumeListening,
     speak,
     stopSpeaking,
 		stopAll,

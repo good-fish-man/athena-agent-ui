@@ -336,6 +336,9 @@ export interface Model {
 	usageRate?: number;
 	usageCount?: number;
 	successRate?: number;
+	inputTokens?: number;
+	outputTokens?: number;
+	totalTokens?: number;
 	enabled: boolean;
 	runtimeMode: ModelRuntimeMode;
 	keyId?: string;
