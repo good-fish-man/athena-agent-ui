@@ -14,6 +14,13 @@ import type {
   ExperienceStats,
   ExperienceStatus,
   Demonstration,
+  AgentBuild,
+  Promotion,
+  ShadowResult,
+  CanaryMetric,
+  RunManifest,
+  DeploymentRollback,
+  DeploymentExposure,
   LearnedSkill,
   LearningCandidate,
   LearningCandidateEvidence,
@@ -273,6 +280,74 @@ export const learningApi = {
   },
   async discardDemonstration(id: string): Promise<Demonstration> {
     return readJson(await apiFetch(`${API_BASE}/learning/demonstrations/${encodeURIComponent(id)}/discard`, { method: 'POST' }));
+  },
+};
+
+export const deploymentApi = {
+  async builds(agentId = ''): Promise<AgentBuild[]> {
+    const query = new URLSearchParams({ limit: '100' });
+    if (agentId) query.set('agent_id', agentId);
+    const value = await readJson<{ items: AgentBuild[] }>(await apiFetch(`${API_BASE}/deployment/builds?${query}`));
+    return value.items || [];
+  },
+  async createBuild(request: { agent_id: string; version: string; risk_level: AgentBuild['risk_level']; prompt_template_versions: Record<string, string>; skill_versions?: Record<string, string>; strategy_versions?: Record<string, string> }): Promise<AgentBuild> {
+    return readJson(await apiFetch(`${API_BASE}/deployment/builds`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request),
+    }));
+  },
+  async promotions(agentId = ''): Promise<Promotion[]> {
+    const query = new URLSearchParams({ limit: '100' });
+    if (agentId) query.set('agent_id', agentId);
+    const value = await readJson<{ items: Promotion[] }>(await apiFetch(`${API_BASE}/deployment/promotions?${query}`));
+    return value.items || [];
+  },
+  async propose(buildId: string, canaryPercent = 10): Promise<Promotion> {
+    return readJson(await apiFetch(`${API_BASE}/deployment/promotions`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ build_id: buildId, canary_percent: canaryPercent, verified: true, recoverable: true }),
+    }));
+  },
+  async transition(promotion: Promotion, targetStatus: Promotion['status'], explicit = false): Promise<Promotion> {
+    return readJson(await apiFetch(`${API_BASE}/deployment/promotions/${encodeURIComponent(promotion.promotion_id)}/transition`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target_status: targetStatus, expected_revision: promotion.revision, explicit }),
+    }));
+  },
+  async shadow(promotionId: string): Promise<ShadowResult[]> {
+    const value = await readJson<{ items: ShadowResult[] }>(await apiFetch(`${API_BASE}/deployment/promotions/${encodeURIComponent(promotionId)}/shadow`));
+    return value.items || [];
+  },
+  async metrics(promotionId: string): Promise<CanaryMetric[]> {
+    const value = await readJson<{ items: CanaryMetric[] }>(await apiFetch(`${API_BASE}/deployment/promotions/${encodeURIComponent(promotionId)}/metrics`));
+    return value.items || [];
+  },
+  async rollback(promotion: Promotion, reason: string): Promise<{ rollback: DeploymentRollback }> {
+    return readJson(await apiFetch(`${API_BASE}/deployment/promotions/${encodeURIComponent(promotion.promotion_id)}/rollback`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason, expected_revision: promotion.revision }),
+    }));
+  },
+  async setOptOut(agentId: string, optedOut: boolean): Promise<void> {
+    await readJson(await apiFetch(`${API_BASE}/deployment/experiment`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ agent_id: agentId, opted_out: optedOut }),
+    }));
+  },
+  async experiment(agentId: string): Promise<DeploymentExposure | null> {
+    const query = new URLSearchParams({ agent_id: agentId });
+    const value = await readJson<{ exposure: DeploymentExposure | null }>(await apiFetch(`${API_BASE}/deployment/experiment?${query}`));
+    return value.exposure || null;
+  },
+  async manifests(agentId = ''): Promise<RunManifest[]> {
+    const query = new URLSearchParams({ limit: '100' });
+    if (agentId) query.set('agent_id', agentId);
+    const value = await readJson<{ items: RunManifest[] }>(await apiFetch(`${API_BASE}/deployment/manifests?${query}`));
+    return value.items || [];
+  },
+  async rollbacks(agentId = ''): Promise<DeploymentRollback[]> {
+    const query = new URLSearchParams({ limit: '100' });
+    if (agentId) query.set('agent_id', agentId);
+    const value = await readJson<{ items: DeploymentRollback[] }>(await apiFetch(`${API_BASE}/deployment/rollbacks?${query}`));
+    return value.items || [];
   },
 };
 

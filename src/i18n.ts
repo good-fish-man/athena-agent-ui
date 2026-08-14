@@ -185,7 +185,7 @@ const resources = {
       experience: {
         title: 'Experience & Evaluation',
         subtitle: 'Inspect sanitized task history, control retention, and replay deterministic offline evaluations without changing production behavior.',
-        library: 'Experience library', evaluation: 'Evaluation lab', learningStudio: 'Learning gate', total: 'Total records', ready: 'Ready', redactions: 'Redactions', evalRuns: 'Evaluation runs', passRate: 'Pass rate',
+        library: 'Experience library', evaluation: 'Evaluation lab', learningStudio: 'Learning gate', deploymentCenter: 'Release control', total: 'Total records', ready: 'Ready', redactions: 'Redactions', evalRuns: 'Evaluation runs', passRate: 'Pass rate',
         learningControl: 'Learning controls', learningControlHint: 'Athena writes only sanitized summaries. Credentials, cookies, raw DOM, screenshots, attachments, and private model reasoning are never stored here.',
         learning: 'Experience generation', enabled: 'Enabled', disabled: 'Disabled', retention: 'Retention (days)', maxSensitivity: 'Maximum sensitivity', savePreference: 'Save controls', preferenceSaved: 'Learning controls saved',
         searchPlaceholder: 'Search goals, decisions, capabilities, or failure classes...', anyStatus: 'Any status', anyOutcome: 'Any outcome', anySensitivity: 'Any sensitivity', refresh: 'Refresh', records: '{{count}} records', historicalOnly: 'Historical evidence only',
@@ -211,6 +211,13 @@ const resources = {
         startDemonstration: 'Start explicit demonstration', demonstrationHint: 'Bind the demonstration to an existing task. Athena stores semantic capabilities and operations only, never raw keys, passwords, or typed credential values.', taskID: 'Task ID', demonstrationTitle: 'Demonstration title', sensitivePause: 'Password, token, cookie, OTP, and 2FA fields pause recording and become a redacted placeholder.', startExplicitly: 'Start recording explicitly', demonstrationHistory: 'Private demonstration history', privateByDefault: 'Private by default · preview, edit, and confirm before reuse', noDemonstrations: 'No demonstrations recorded yet.', demonstrationStarted: 'Demonstration recording started', demonstrationFailed: 'Demonstration action failed',
         demonstrationActions: { resume: 'Resume', preview: 'Build preview', confirm: 'Confirm', discard: 'Discard', resumeDone: 'Recording resumed', previewDone: 'Preview created', confirmDone: 'Demonstration confirmed', discardDone: 'Demonstration discarded' },
         loadFailed: 'Failed to load the learning gate'
+      },
+      deployment: {
+        title: 'Build, promotion & rollback', subtitle: 'Pin every run to an immutable AgentBuild, validate changes in a side-effect-free shadow, expose low-risk releases through stable Canary cohorts, and roll back by switching the active pointer.',
+        immutable: 'Immutable checksummed builds', shadowSafe: 'Shadow never writes to the real world', pointerRollback: 'Atomic pointer rollback with compensation', newBuild: 'Create AgentBuild', newBuildHint: 'Select exact reviewed Skill and Strategy versions. A build never mutates after creation.', agent: 'Agent', selectAgent: 'Select an Agent', version: 'Build version', risk: 'Risk level', createBuild: 'Create immutable build', builds: 'Build catalog', propose: 'Propose release', noBuilds: 'No builds for this Agent.',
+        promotionPipeline: 'Promotion pipeline', pipelineHint: 'PROPOSED → REVIEWED → SHADOW → CANARY → ACTIVE. R2/R3 require explicit activation and never enter automatic Canary.', noPromotions: 'No release proposals yet.', shadowRuns: 'Shadow evidence', canarySamples: 'Canary samples', previousBuild: 'Previous build', review: 'Mark reviewed', startShadow: 'Start Shadow', startCanary: 'Start Canary', explicitActivate: 'Explicitly activate', activate: 'Activate', pause: 'Pause', rollback: 'Roll back', shadowEvidence: 'Shadow comparison', waitingShadow: 'Waiting for a side-effect-free evaluator result.', canaryHealth: 'Canary health', waitingMetrics: 'Waiting for production metrics.', passed: 'Passed', failed: 'Failed', noSideEffects: 'No external side effects', stopped: 'Stopped by threshold',
+        experiment: 'Your Canary assignment', experimentHint: 'The cohort is stable for this account and Agent. You can leave or rejoin without changing other users.', variant: 'Variant', bucket: 'Stable bucket', leaveExperiment: 'Leave Canary experiment', joinExperiment: 'Rejoin Canary experiment', noExperiment: 'This Agent has no active Canary.', experimentLeft: 'Canary experiment disabled for this Agent', experimentJoined: 'Canary experiment re-enabled',
+        runManifests: 'Run manifests', runManifestHint: 'Every execution records the exact build checksum, model configuration fingerprint, capabilities, device, budget, and world revision.', rollbackHistory: 'Rollback history', rollbackHistoryHint: 'Pointer changes remain auditable; external effects require explicit compensation.', noRollbacks: 'No rollbacks recorded.', loadFailed: 'Failed to load release control', buildCreated: 'Immutable build created', buildFailed: 'Could not create build', promotionCreated: 'Release proposal created', actionFailed: 'Release action failed', transitioned: 'Promotion moved to {{status}}', rollbackConfirm: 'Switch back to the previous build? External effects are not silently undone and may require compensation.', rolledBack: 'Previous build restored'
       },
       websiteAccounts: {
         title: 'Website Accounts', subtitle: 'Save low-risk website credentials in the encrypted local Auth Vault and let Agents receive only authenticated browser sessions.',
@@ -1137,7 +1144,7 @@ const resources = {
       experience: {
         title: '经验与评测',
         subtitle: '查看经过脱敏的任务经验、控制保留策略，并进行确定性的离线回放；不会自动改变生产行为。',
-        library: '经验库', evaluation: '评测实验室', learningStudio: '学习门禁', total: '记录总数', ready: '可用经验', redactions: '脱敏次数', evalRuns: '评测次数', passRate: '通过率',
+        library: '经验库', evaluation: '评测实验室', learningStudio: '学习门禁', deploymentCenter: '发布控制', total: '记录总数', ready: '可用经验', redactions: '脱敏次数', evalRuns: '评测次数', passRate: '通过率',
         learningControl: '学习控制', learningControlHint: 'Athena 只保存脱敏摘要。凭据、Cookie、原始 DOM、截图、附件及模型私有推理不会写入经验库。',
         learning: '经验生成', enabled: '已启用', disabled: '已停用', retention: '保留天数', maxSensitivity: '最高敏感级别', savePreference: '保存控制项', preferenceSaved: '学习控制已保存',
         searchPlaceholder: '搜索目标、决策、能力或失败分类...', anyStatus: '全部状态', anyOutcome: '全部结果', anySensitivity: '全部敏感级别', refresh: '刷新', records: '共 {{count}} 条', historicalOnly: '仅作为历史证据',
@@ -1163,6 +1170,13 @@ const resources = {
         startDemonstration: '显式开始人工演示', demonstrationHint: '将演示绑定到已有任务。Athena 只保存语义能力与操作，不保存原始按键、密码或输入的凭据值。', taskID: '任务 ID', demonstrationTitle: '演示标题', sensitivePause: '密码、Token、Cookie、OTP 和 2FA 字段会暂停记录，并替换为脱敏占位符。', startExplicitly: '显式开始记录', demonstrationHistory: '私有演示历史', privateByDefault: '默认私有 · 使用前先预览、编辑并确认', noDemonstrations: '还没有人工演示。', demonstrationStarted: '人工演示已开始记录', demonstrationFailed: '演示操作失败',
         demonstrationActions: { resume: '继续记录', preview: '生成预览', confirm: '确认', discard: '丢弃', resumeDone: '已继续记录', previewDone: '预览已生成', confirmDone: '演示已确认', discardDone: '演示已丢弃' },
         loadFailed: '加载学习门禁失败'
+      },
+      deployment: {
+        title: '构建、发布与回滚', subtitle: '将每次运行固定到不可变 AgentBuild；先在零副作用 Shadow 中验证，再以稳定 Canary 人群发布低风险版本，并通过切换活动指针一键回滚。',
+        immutable: '带校验和的不可变构建', shadowSafe: 'Shadow 不写入真实世界', pointerRollback: '原子切换指针并记录补偿', newBuild: '创建 AgentBuild', newBuildHint: '明确选择已评审的 Skill 与 Strategy 版本；构建创建后不可修改。', agent: 'Agent', selectAgent: '选择 Agent', version: '构建版本', risk: '风险级别', createBuild: '创建不可变构建', builds: '构建目录', propose: '提出发布', noBuilds: '这个 Agent 还没有构建。',
+        promotionPipeline: '发布状态机', pipelineHint: 'PROPOSED → REVIEWED → SHADOW → CANARY → ACTIVE。R2/R3 必须显式激活，禁止自动进入 Canary。', noPromotions: '还没有发布提案。', shadowRuns: 'Shadow 证据', canarySamples: 'Canary 样本', previousBuild: '上一构建', review: '标记已评审', startShadow: '开始 Shadow', startCanary: '开始 Canary', explicitActivate: '显式激活', activate: '激活', pause: '暂停', rollback: '回滚', shadowEvidence: 'Shadow 对比', waitingShadow: '等待零副作用评测结果。', canaryHealth: 'Canary 健康度', waitingMetrics: '等待生产指标。', passed: '通过', failed: '失败', noSideEffects: '无外部副作用', stopped: '已触发停止阈值',
+        experiment: '你的 Canary 分组', experimentHint: '同一账号与 Agent 的分组保持稳定；退出或重新加入不会影响其他用户。', variant: '分组', bucket: '稳定桶位', leaveExperiment: '退出 Canary 实验', joinExperiment: '重新加入 Canary 实验', noExperiment: '这个 Agent 当前没有 Canary。', experimentLeft: '已为这个 Agent 退出 Canary', experimentJoined: '已重新加入 Canary',
+        runManifests: '运行清单', runManifestHint: '每次执行都记录精确构建校验和、模型配置指纹、能力、设备、预算和世界版本。', rollbackHistory: '回滚历史', rollbackHistoryHint: '指针切换可完整审计；外部副作用必须显式补偿。', noRollbacks: '还没有回滚记录。', loadFailed: '加载发布控制失败', buildCreated: '不可变构建已创建', buildFailed: '创建构建失败', promotionCreated: '发布提案已创建', actionFailed: '发布操作失败', transitioned: '发布已进入 {{status}}', rollbackConfirm: '确定切回上一构建吗？外部副作用不会被静默撤销，可能需要补偿。', rolledBack: '已恢复上一构建'
       },
       websiteAccounts: {
         title: '网站账号', subtitle: '将低风险网站账号保存在本机加密 Auth Vault 中，Agent 只能获得认证后的浏览器会话。',

@@ -287,6 +287,130 @@ export interface Demonstration {
   updated_at: string;
 }
 
+export type DeploymentStatus = 'PROPOSED' | 'REVIEWED' | 'SHADOW' | 'CANARY' | 'ACTIVE' | 'PAUSED' | 'ROLLED_BACK' | 'RETIRED';
+export type DeploymentRisk = 'R0' | 'R1' | 'R2' | 'R3';
+
+export interface AgentBuild {
+  schema: 'athena.deployment.v1';
+  build_id: string;
+  owner_id: string;
+  agent_id: string;
+  version: string;
+  kernel_version: string;
+  planner_version: string;
+  policy_version: string;
+  protocol_version: string;
+  skill_versions?: Record<string, string>;
+  strategy_versions?: Record<string, string>;
+  ontology_version: string;
+  prompt_template_versions: Record<string, string>;
+  evaluation_suite_version: string;
+  risk_level: DeploymentRisk;
+  checksum: string;
+  created_by: string;
+  created_at: string;
+}
+
+export interface CanaryThresholds {
+  minimum_success_rate: number;
+  maximum_p95_latency_ms: number;
+  maximum_average_cost_micros: number;
+  minimum_safety_score: number;
+  maximum_intervention_rate: number;
+  minimum_samples: number;
+}
+
+export interface Promotion {
+  schema: 'athena.deployment.v1';
+  promotion_id: string;
+  owner_id: string;
+  agent_id: string;
+  build_id: string;
+  previous_build_id?: string;
+  status: DeploymentStatus;
+  risk_level: DeploymentRisk;
+  canary_percent: number;
+  thresholds: CanaryThresholds;
+  verified: boolean;
+  recoverable: boolean;
+  approved_by?: string;
+  revision: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DeploymentExposure {
+  exposure_id: string;
+  promotion_id: string;
+  owner_id: string;
+  agent_id: string;
+  bucket: number;
+  variant: 'CONTROL' | 'CANDIDATE';
+  opted_out: boolean;
+  created_at: string;
+}
+
+export interface ShadowResult {
+  shadow_id: string;
+  promotion_id: string;
+  task_id: string;
+  production_route_hash: string;
+  candidate_route_hash: string;
+  production_graph_hash: string;
+  candidate_graph_hash: string;
+  production_actions_hash: string;
+  candidate_actions_hash: string;
+  production_cost_micros: number;
+  candidate_cost_micros: number;
+  production_risk: DeploymentRisk;
+  candidate_risk: DeploymentRisk;
+  latency_ms: number;
+  no_external_side_effects: boolean;
+  executed_action_count: number;
+  passed: boolean;
+  summary?: string;
+  created_at: string;
+}
+
+export interface CanaryMetric {
+  metric_id: string;
+  promotion_id: string;
+  sample_count: number;
+  success_rate: number;
+  p95_latency_ms: number;
+  average_cost_micros: number;
+  safety_score: number;
+  intervention_rate: number;
+  stop_triggered: boolean;
+  stop_reason?: string;
+  created_at: string;
+}
+
+export interface RunManifest {
+  manifest_id: string;
+  task_id: string;
+  agent_id: string;
+  agent_build_id: string;
+  model_config_version: string;
+  capability_instances: string[];
+  device_id?: string;
+  world_revision: number;
+  knowledge_snapshot: string;
+  exposure_id?: string;
+  created_at: string;
+}
+
+export interface DeploymentRollback {
+  rollback_id: string;
+  promotion_id: string;
+  agent_id: string;
+  from_build_id: string;
+  to_build_id: string;
+  reason: string;
+  requested_by: string;
+  created_at: string;
+}
+
 export interface Agent {
   ulid?: string;
   id: string;

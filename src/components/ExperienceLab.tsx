@@ -17,6 +17,7 @@ import {
   LockKeyhole,
   Play,
   RefreshCw,
+  Rocket,
   Search,
   ShieldCheck,
   Sparkles,
@@ -29,6 +30,7 @@ import { toast } from 'sonner';
 import { experienceApi } from '../lib/api';
 import { cn } from '../lib/utils';
 import { LearningStudio } from './LearningStudio';
+import { DeploymentCenter } from './DeploymentCenter';
 import type {
   EvaluationFixture,
   EvaluationResult,
@@ -42,7 +44,7 @@ import type {
   ExperienceStatus,
 } from '../types';
 
-type WorkspaceTab = 'experience' | 'evaluation' | 'learning';
+type WorkspaceTab = 'experience' | 'evaluation' | 'learning' | 'deployment';
 
 const defaultStats: ExperienceStats = {
   total: 0,
@@ -351,7 +353,7 @@ export function ExperienceLab() {
             <h1 className="text-3xl font-black tracking-tight lg:text-4xl">{t('experience.title')}</h1>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">{t('experience.subtitle')}</p>
           </div>
-          <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 p-1 backdrop-blur">
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-white/10 bg-white/5 p-1 backdrop-blur">
             <button type="button" onClick={() => setTab('experience')} className={cn('flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-bold transition', tab === 'experience' ? 'bg-white text-slate-950' : 'text-slate-400 hover:text-white')}>
               <History size={15} /> {t('experience.library')}
             </button>
@@ -360,6 +362,9 @@ export function ExperienceLab() {
             </button>
             <button type="button" onClick={() => setTab('learning')} className={cn('flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-bold transition', tab === 'learning' ? 'bg-white text-slate-950' : 'text-slate-400 hover:text-white')}>
               <GraduationCap size={15} /> {t('experience.learningStudio')}
+            </button>
+            <button type="button" onClick={() => setTab('deployment')} className={cn('flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-bold transition', tab === 'deployment' ? 'bg-white text-slate-950' : 'text-slate-400 hover:text-white')}>
+              <Rocket size={15} /> {t('experience.deploymentCenter')}
             </button>
           </div>
         </div>
@@ -490,8 +495,10 @@ export function ExperienceLab() {
             onRunSuite={runSuite}
             onShowResults={showResults}
           />
-        ) : (
+        ) : tab === 'learning' ? (
           <LearningStudio experiences={items} />
+        ) : (
+          <DeploymentCenter />
         )}
       </main>
     </div>
