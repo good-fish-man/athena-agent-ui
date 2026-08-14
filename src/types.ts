@@ -1,4 +1,5 @@
 import type { ModelRuntimeMode } from './lib/runtimeConstants';
+import type { Observation as ProtocolObservation } from './generated/athena-protocol-v4';
 
 export type View = 'dashboard' | 'orchestrator' | 'agents' | 'skills' | 'knowledge' | 'models' | 'media' | 'chat' | 'workspace' | 'website-accounts' | 'settings' | 'inbox';
 
@@ -86,17 +87,8 @@ export interface BrowserSuggestedAction {
   postcondition?: Record<string, unknown>;
 }
 
-export interface ControlObservation {
-  protocol: string;
-  type: 'OBSERVATION' | string;
-  task_id: string;
-  action_id: string;
-  session_id?: string;
-  sequence: number;
-  status: string;
-  observed_at?: string;
+export interface ControlObservation extends Omit<ProtocolObservation, 'state'> {
   state?: Record<string, any>;
-  error?: string;
 }
 
 export interface ResearchSourcePage {

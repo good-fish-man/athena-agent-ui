@@ -81,6 +81,8 @@ import { desktopPermissions } from '../lib/desktopPermissions';
 import { formatAssistantOutput } from '../lib/outputFormatting';
 import ResearchSourcesPanel from './ResearchSourcesPanel';
 import BrowserExecutionPanel, { hasBrowserExecution } from './BrowserExecutionPanel';
+import { ATHENA_PROTOCOL, type ObservationStatus } from '../generated/athena-protocol-v4';
+import ControlTaskTimeline from './ControlTaskTimeline';
 
 // 辅助函数：检测并提取 Markdown 中的 HTML 代码块
 function extractHtmlFromMarkdown(content: string): { html: string | null; markdown: string; reportUrl: string | null; pptUrl: string | null } {
@@ -681,9 +683,19 @@ function browserSafeAutomation(value: unknown): Record<string, unknown> | undefi
 }
 
 function browserSafeObservation(value: unknown): ControlObservation | undefined {
-  const source = browserRecord(value);
-  const state = browserRecord(source?.state);
-  if (!source || !state || (!state.browser_task && !state.automation_state && !state.capability_handoff)) return undefined;
+	const source = browserRecord(value);
+	const state = browserRecord(source?.state);
+	if (!source || source.protocol !== ATHENA_PROTOCOL || !state || (!state.browser_task && !state.automation_state && !state.capability_handoff)) return undefined;
+	const observationId = browserText(source.observation_id, 160);
+	const taskId = browserText(source.task_id, 160);
+	const stepId = browserText(source.step_id, 160);
+	const actionId = browserText(source.action_id, 160);
+	const observedAt = browserText(source.observed_at, 64);
+	const revision = browserNumber(source.revision);
+	const sequence = browserNumber(source.sequence);
+	const rawStatus = browserText(source.status, 40);
+	const statuses = new Set<ObservationStatus>(['SUCCEEDED', 'FAILED', 'CANCELLED', 'EXPIRED', 'BLOCKED', 'WAITING_APPROVAL', 'WAITING_USER']);
+	if (!observationId || !taskId || !stepId || !actionId || !observedAt || !revision || !sequence || !rawStatus || !statuses.has(rawStatus as ObservationStatus)) return undefined;
   const handoff = browserRecord(state.capability_handoff);
   const playback = browserRecord(state.playback);
   const safeState = compactRecord({
@@ -707,18 +719,25 @@ function browserSafeObservation(value: unknown): ControlObservation | undefined 
     }) : undefined,
     continuation_required: browserBoolean(state.continuation_required),
   });
-  return {
-    protocol: browserText(source.protocol, 120) || 'athena.action-observation.v3',
-    type: browserText(source.type, 40) || 'OBSERVATION',
-    task_id: browserText(source.task_id, 160) || '',
-    action_id: browserText(source.action_id, 160) || '',
-    session_id: browserText(source.session_id, 160),
-    sequence: browserNumber(source.sequence) || 0,
-    status: browserText(source.status, 40) || 'SUCCEEDED',
-    observed_at: browserText(source.observed_at, 64),
-    error: browserText(source.error, 1000),
-    state: safeState,
-  };
+	return {
+		protocol: ATHENA_PROTOCOL,
+		type: 'OBSERVATION',
+		observation_id: observationId,
+		task_id: taskId,
+		step_id: stepId,
+		action_id: actionId,
+		device_id: browserText(source.device_id, 160),
+		session_id: browserText(source.session_id, 160),
+		sequence,
+		revision,
+		status: rawStatus as ObservationStatus,
+		started_at: browserText(source.started_at, 64),
+		finished_at: browserText(source.finished_at, 64),
+		observed_at: observedAt,
+		summary: browserText(source.summary, 1000),
+		error: browserText(source.error, 1000),
+		state: safeState,
+	};
 }
 
 function browserSafeSuggestedActions(value: unknown): BrowserSuggestedAction[] {
@@ -2404,15 +2423,24 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent, on
     void handleSend(text);
   };
 
-  const stopGeneration = () => {
+	const stopGeneration = () => {
     console.log('[Stop] stopGeneration called, checkpointId:', checkpointIdRef.current, 'sessionId:', activeConversationId);
     userInitiatedStopRef.current = true;
     // 直接发送 stop 请求到后端（使用 session_id 来停止）
-    void chatApi.stopAgent(checkpointIdRef.current || '', activeConversationId || '').then(() => {
+		void chatApi.stopAgent(checkpointIdRef.current || '', activeConversationId || '').then(() => {
       console.log('[Stop] Backend stop API success');
     }).catch(err => {
       console.error('[Stop] Backend stop API failed:', err);
-    });
+		});
+		if (activeConversationId) {
+			void controlApi.tasks(activeConversationId).then(tasks => Promise.all(
+				tasks
+					.filter(task => !['COMPLETED', 'FAILED', 'CANCELLED'].includes(task.status))
+					.map(task => controlApi.cancelTask(task.task_id, 'user pressed Stop in Chat')),
+			)).catch(err => {
+				console.error('[Stop] Task cancellation failed:', err);
+			});
+		}
     // abort 前端的 fetch 请求
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -2821,7 +2849,9 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent, on
             </div>
           )}
 
-          {messages.map((msg) => (
+		  <ControlTaskTimeline conversationId={activeConversationId} />
+
+		  {messages.map((msg) => (
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}

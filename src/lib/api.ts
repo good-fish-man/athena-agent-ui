@@ -1,4 +1,13 @@
 import type { Agent, BrowserSuggestedAction, ControlObservation } from '../types';
+import {
+  ATHENA_PROTOCOL,
+  type Action as ProtocolAction,
+  type Approval,
+  type CapabilityInstance,
+  type TaskEvent,
+  type TaskSession,
+  type WorldState,
+} from '../generated/athena-protocol-v4';
 import i18n from '../i18n';
 import {
   MODEL_RUNTIME_MODE,
@@ -82,23 +91,19 @@ export interface ControlDevice {
   platform: string;
   architecture: string;
   capabilities: string[];
+	capability_instances?: CapabilityInstance[];
   online: boolean;
   connected_at?: string;
   last_seen_at?: string;
 }
 
-export interface ControlTask {
-  task_id: string;
-  conversation_id?: string;
-  user_id: string;
-  device_id: string;
-  status: string;
-  sequence: number;
-  active_sessions?: Record<string, string>;
-  actions?: unknown[];
-  observations?: unknown[];
-  created_at: string;
-  updated_at: string;
+export type ControlTask = TaskSession;
+export type ControlApproval = Approval;
+
+export interface ControlApprovalDecision {
+	approval: ControlApproval;
+	observation?: ControlObservation | null;
+	pending_recovery: boolean;
 }
 
 export const controlApi = {
@@ -109,15 +114,54 @@ export const controlApi = {
   async bindDevice(deviceId: string): Promise<void> {
     await readJson(await apiFetch(`${RUNTIME_API_BASE}/control/devices/${encodeURIComponent(deviceId)}/bind`, { method: 'POST' }));
   },
+	async approvals(status = 'PENDING'): Promise<ControlApproval[]> {
+		const query = status ? `?status=${encodeURIComponent(status)}` : '';
+		const result = await readJson<{ approvals: ControlApproval[] }>(await apiFetch(`${RUNTIME_API_BASE}/control/approvals${query}`));
+		return result.approvals || [];
+	},
+	async decideApproval(approvalId: string, approved: boolean, reason = ''): Promise<ControlApprovalDecision> {
+		return readJson<ControlApprovalDecision>(await apiFetch(`${RUNTIME_API_BASE}/control/approvals/${encodeURIComponent(approvalId)}/decision`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ approved, reason }),
+		}));
+	},
   async tasks(conversationId?: string): Promise<ControlTask[]> {
     const query = conversationId ? `?conversation_id=${encodeURIComponent(conversationId)}` : '';
     const result = await readJson<{ tasks: ControlTask[] }>(await apiFetch(`${RUNTIME_API_BASE}/control/tasks${query}`));
     return result.tasks || [];
   },
-  async task(taskId: string): Promise<ControlTask> {
-    return readJson<ControlTask>(await apiFetch(`${RUNTIME_API_BASE}/control/tasks/${encodeURIComponent(taskId)}`));
-  },
-  async executeSuggestedAction(action: BrowserSuggestedAction, sessionId: string, deviceId = ''): Promise<ControlObservation> {
+	async task(taskId: string): Promise<ControlTask> {
+		return readJson<ControlTask>(await apiFetch(`${RUNTIME_API_BASE}/control/tasks/${encodeURIComponent(taskId)}`));
+	},
+	async taskEvents(taskId: string, after = 0): Promise<TaskEvent[]> {
+		const result = await readJson<{ events: TaskEvent[] }>(await apiFetch(`${RUNTIME_API_BASE}/control/tasks/${encodeURIComponent(taskId)}/events?after=${after}`));
+		return result.events || [];
+	},
+	async taskWorld(taskId: string): Promise<WorldState> {
+		return readJson<WorldState>(await apiFetch(`${RUNTIME_API_BASE}/control/tasks/${encodeURIComponent(taskId)}/world`));
+	},
+	async cancelTask(taskId: string, reason = 'user requested cancellation'): Promise<void> {
+		await readJson(await apiFetch(`${RUNTIME_API_BASE}/control/tasks/${encodeURIComponent(taskId)}/cancel`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ reason }),
+		}));
+	},
+	subscribeTaskEvents(taskId: string, after: number, onEvent: (event: TaskEvent) => void, onError?: () => void): () => void {
+		const url = `${RUNTIME_API_BASE}/control/tasks/${encodeURIComponent(taskId)}/events/stream?after=${after}`;
+		const source = new EventSource(url, { withCredentials: true });
+		source.addEventListener('task_event', raw => {
+			try {
+				onEvent(JSON.parse((raw as MessageEvent<string>).data) as TaskEvent);
+			} catch (error) {
+				console.warn('[control] ignored malformed task event', error);
+			}
+		});
+		source.onerror = () => onError?.();
+		return () => source.close();
+	},
+	async executeSuggestedAction(action: BrowserSuggestedAction, sessionId: string, deviceId = ''): Promise<ControlObservation> {
 		const allowedCapabilities = new Set(['browser.click', 'browser.play', 'browser.pause', 'browser.navigate', 'browser.press']);
     if (action.schema !== 'athena.browser.suggestion.v1' || !allowedCapabilities.has(action.capability)) {
       throw new Error('Unsupported browser suggestion');
@@ -125,35 +169,58 @@ export const controlApi = {
     if (!sessionId) {
       throw new Error('The browser session is no longer available');
     }
-    const taskId = runtimeControlID('browser-task');
-    const actionId = runtimeControlID('browser-action');
-    const risk = String(action.risk || 'LOW').toUpperCase();
-    const response = await apiFetch(`${RUNTIME_API_BASE}/control/actions`, {
+		const taskId = runtimeControlID('browser-task');
+		const stepId = runtimeControlID('browser-step');
+		const actionId = runtimeControlID('browser-action');
+		const risk = controlRisk(action.risk);
+		const issuedAt = new Date();
+		const operation = action.capability.includes('.') ? action.capability.split('.').at(-1) : action.capability;
+		const protocolAction: ProtocolAction = {
+			protocol: ATHENA_PROTOCOL,
+			type: 'ACTION',
+			task_id: taskId,
+			step_id: stepId,
+			action_id: actionId,
+			session_id: sessionId,
+			sequence: 1,
+			revision: 1,
+			idempotency_key: `${taskId}:${stepId}:${actionId}`,
+			issued_at: issuedAt.toISOString(),
+			deadline: new Date(issuedAt.getTime() + 60_000).toISOString(),
+			capability: action.capability,
+			operation,
+			arguments: { ...action.arguments },
+			policy: {
+				risk,
+				decision: 'ALLOW',
+				reason: 'The signed-in user explicitly selected this browser action in the Athena UI.',
+			},
+			expected_observation: { kind: action.capability, timeout_ms: 60_000 },
+		};
+		const response = await apiFetch(`${RUNTIME_API_BASE}/control/actions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        device_id: deviceId,
-        action: {
-          protocol: 'athena.agent.v3',
-          type: 'ACTION',
-          task_id: taskId,
-          action_id: actionId,
-          session_id: sessionId,
-          sequence: 1,
-          idempotency_key: `${taskId}:${actionId}`,
-          deadline: new Date(Date.now() + 60_000).toISOString(),
-          capability: action.capability,
-          arguments: { ...action.arguments },
-          policy: {
-            risk: risk === 'MEDIUM' || risk === 'HIGH' ? risk : 'LOW',
-            decision: 'ALLOW',
-          },
-        },
-      }),
+		body: JSON.stringify({ device_id: deviceId, action: protocolAction }),
     });
     return readJson<ControlObservation>(response);
   },
 };
+
+function controlRisk(value: string) {
+	switch (String(value || '').toUpperCase()) {
+		case 'R1':
+		case 'MEDIUM':
+			return 'R1' as const;
+		case 'R2':
+		case 'HIGH':
+			return 'R2' as const;
+		case 'R3':
+		case 'SENSITIVE':
+			return 'R3' as const;
+		default:
+			return 'R0' as const;
+	}
+}
 
 function runtimeControlID(prefix: string): string {
   const value = typeof crypto.randomUUID === 'function'
