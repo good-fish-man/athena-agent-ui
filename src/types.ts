@@ -508,7 +508,9 @@ export interface GoldenJourneyStepResult {
 }
 
 export interface GoldenJourneyResult {
+  run_id: string;
   journey_id: string;
+  verification_level: 'PREFLIGHT' | 'E2E';
   status: GAReadinessStatus;
   steps: GoldenJourneyStepResult[];
   started_at: string;

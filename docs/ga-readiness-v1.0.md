@@ -11,11 +11,18 @@ health or success values in the browser.
 - evidence references supplied by Runtime Client and Launcher;
 - encrypted backup inventory, create, verify, and restore controls;
 - the stable ten-journey catalog;
-- a non-destructive Golden Journey infrastructure preflight.
+- a non-destructive Golden Journey infrastructure preflight;
+- the verification level, immutable run ID, and latest persisted result for
+  every journey.
 
 Status colors preserve protocol meaning. `EXTERNAL_REQUIRED` is deliberately
 different from success and identifies work such as a real device flow,
 installer test, signature, notarization, or soak test.
+
+`PREFLIGHT` means infrastructure inspection and can never be shown as success.
+Only independently submitted `E2E` evidence can satisfy `golden.suite` and
+`trace.provenance`. The UI renders backend evidence; it does not promote or
+rewrite a status locally.
 
 ## Access and Safety
 

@@ -10,9 +10,12 @@ Operations 工作区只展示后端证据，不会在浏览器中伪造健康状
 - Runtime Client 和 Launcher 提供的证据引用；
 - 加密备份库存、创建、验证与恢复入口；
 - 固定的十条核心用户旅程；
-- 无副作用 Golden Journey 基础设施预检。
+- 无副作用 Golden Journey 基础设施预检；
+- 每条旅程的验证级别、不可变 Run ID 与最近持久化结果。
 
 状态颜色保持协议语义。`EXTERNAL_REQUIRED` 不等于成功，表示仍需真实设备流程、安装包测试、签名、公证或持续压测。
+
+`PREFLIGHT` 只表示基础设施检查，永远不能显示为成功。只有独立提交的 `E2E` 证据才能满足 `golden.suite` 与 `trace.provenance`；前端只展示后端证据，不在本地提升或改写状态。
 
 ## 权限与安全
 

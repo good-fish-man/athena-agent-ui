@@ -501,6 +501,12 @@ export const operationsApi = {
     const value = await readJson<{ items: GoldenJourneyResult[] }>(await apiFetch(`${API_BASE}/operations/golden-journeys/run`, { method: 'POST' }));
     return value.items || [];
   },
+  async recordGoldenJourneyEvidence(items: GoldenJourneyResult[]): Promise<GoldenJourneyResult[]> {
+    const value = await readJson<{ items: GoldenJourneyResult[] }>(await apiFetch(`${API_BASE}/operations/golden-journeys/evidence`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }),
+    }));
+    return value.items || [];
+  },
   async createBackup(): Promise<BackupManifest> {
     return readJson<BackupManifest>(await apiFetch(`${API_BASE}/operations/backups`, { method: 'POST' }));
   },
