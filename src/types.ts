@@ -178,16 +178,19 @@ export interface DeclarativeSkill {
   id: string;
   version: string;
   description: string;
+  preconditions: Array<{ field: string; operator: string; value?: unknown }>;
   required_capabilities: string[];
   task_graph_template: {
     steps: Array<{ id: string; capability: string; operation: string; arguments?: Record<string, unknown>; depends_on?: string[] }>;
   };
+  recovery_paths: Array<{ on: string; step_ids: string[]; max_attempts: number }>;
   verification_rules: Array<{ field: string; operator: string; expected?: unknown; evidence_required: boolean }>;
   risk_ceiling: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
   evaluation_suite: { suite_id: string; minimum_sample: number; minimum_score: number };
   owner_id: string;
   visibility: 'PRIVATE' | 'TEAM' | 'PUBLIC';
   lifecycle_state: LearningLifecycle;
+  metadata?: Record<string, string>;
   input_schema: Record<string, unknown>;
   output_schema: Record<string, unknown>;
 }
@@ -222,6 +225,13 @@ export interface LearningCandidate {
     failure_count: number;
     counterexamples: number;
     pattern: string;
+    contexts: Array<{
+      experience_id: string;
+      environment_fingerprint: string;
+      site_scope: string;
+      outcome: 'SUCCEEDED' | 'FAILED';
+      failure_condition?: string;
+    }>;
   };
   evaluation: {
     run_id?: string;
