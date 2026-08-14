@@ -416,6 +416,65 @@ export interface BackupManifest {
   manifest_sha256: string;
 }
 
+export type GAReadinessStatus = 'PASS' | 'FAIL' | 'BLOCKED' | 'EXTERNAL_REQUIRED' | 'NOT_RUN';
+
+export interface GAEvidenceRef {
+  kind: string;
+  reference: string;
+  sha256?: string;
+}
+
+export interface GAReadinessCheck {
+  id: string;
+  category: string;
+  status: GAReadinessStatus;
+  required: boolean;
+  message: string;
+  evidence?: GAEvidenceRef[];
+}
+
+export interface GoldenJourneyStep {
+  id: string;
+  capability: string;
+  expected_evidence: string[];
+  requires_approval: boolean;
+}
+
+export interface GoldenJourney {
+  id: string;
+  title: string;
+  description: string;
+  required: boolean;
+  steps: GoldenJourneyStep[];
+}
+
+export interface GoldenJourneyStepResult {
+  step_id: string;
+  status: GAReadinessStatus;
+  message: string;
+  evidence?: GAEvidenceRef[];
+  duration_ms: number;
+}
+
+export interface GoldenJourneyResult {
+  journey_id: string;
+  status: GAReadinessStatus;
+  steps: GoldenJourneyStepResult[];
+  started_at: string;
+  finished_at: string;
+}
+
+export interface GAReadinessReport {
+  schema: 'athena.ga.v1';
+  release_version: string;
+  component: string;
+  instance_id: string;
+  status: GAReadinessStatus;
+  checks: GAReadinessCheck[];
+  journeys?: GoldenJourneyResult[];
+  observed_at: string;
+}
+
 export interface AgentBuild {
   schema: 'athena.deployment.v1';
   build_id: string;

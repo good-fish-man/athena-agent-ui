@@ -38,6 +38,9 @@ import type {
 	PluginInvocationTrace,
 	OperationsSnapshot,
 	BackupManifest,
+	GAReadinessReport,
+	GoldenJourney,
+	GoldenJourneyResult,
 } from '../types';
 import {
   ATHENA_PROTOCOL,
@@ -451,6 +454,16 @@ export const operationsApi = {
   },
   async backups(): Promise<BackupManifest[]> {
     const value = await readJson<{ items: BackupManifest[] }>(await apiFetch(`${API_BASE}/operations/backups`));
+    return value.items || [];
+  },
+  async readiness(): Promise<GAReadinessReport> {
+    return readJson<GAReadinessReport>(await apiFetch(`${API_BASE}/operations/readiness`));
+  },
+  async goldenJourneys(): Promise<{ items: GoldenJourney[]; last_results: GoldenJourneyResult[] }> {
+    return readJson(await apiFetch(`${API_BASE}/operations/golden-journeys`));
+  },
+  async runGoldenJourneys(): Promise<GoldenJourneyResult[]> {
+    const value = await readJson<{ items: GoldenJourneyResult[] }>(await apiFetch(`${API_BASE}/operations/golden-journeys/run`, { method: 'POST' }));
     return value.items || [];
   },
   async createBackup(): Promise<BackupManifest> {

@@ -2,6 +2,8 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
+GA operations: [Athena 1.0 readiness workspace](docs/ga-readiness-v1.0.md) | [简体中文](docs/ga-readiness-v1.0.zh-CN.md)
+
 Athena Agent UI is the browser interface for the Athena agent platform. It connects to [`agent-runtime-client`](https://github.com/good-fish-man/agent-runtime-client) and provides agent creation, model management, chat, project editing, knowledge, skills, voice interaction, monitoring, and service configuration in one application.
 
 <p align="center">

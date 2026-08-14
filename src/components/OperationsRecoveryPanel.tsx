@@ -4,7 +4,9 @@ import {
   DatabaseBackup,
   HardDrive,
   HeartPulse,
+  ListChecks,
   Loader2,
+  PlayCircle,
   RefreshCw,
   RotateCcw,
   Server,
@@ -17,7 +19,7 @@ import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { operationsApi } from '../lib/api';
 import { cn } from '../lib/utils';
-import type { BackupManifest, OperationsHealthStatus, OperationsSnapshot } from '../types';
+import type { BackupManifest, GAReadinessReport, GAReadinessStatus, GoldenJourney, GoldenJourneyResult, OperationsHealthStatus, OperationsSnapshot } from '../types';
 
 const healthTone: Record<OperationsHealthStatus, string> = {
   HEALTHY: 'border-emerald-200 bg-emerald-50 text-emerald-700',
@@ -25,10 +27,21 @@ const healthTone: Record<OperationsHealthStatus, string> = {
   UNHEALTHY: 'border-red-200 bg-red-50 text-red-700',
 };
 
+const readinessTone: Record<GAReadinessStatus, string> = {
+  PASS: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+  FAIL: 'border-red-200 bg-red-50 text-red-700',
+  BLOCKED: 'border-red-200 bg-red-50 text-red-700',
+  EXTERNAL_REQUIRED: 'border-amber-200 bg-amber-50 text-amber-700',
+  NOT_RUN: 'border-slate-200 bg-slate-50 text-slate-500',
+};
+
 export function OperationsRecoveryPanel() {
   const { t } = useTranslation();
   const [snapshot, setSnapshot] = React.useState<OperationsSnapshot | null>(null);
   const [backups, setBackups] = React.useState<BackupManifest[]>([]);
+  const [readiness, setReadiness] = React.useState<GAReadinessReport | null>(null);
+  const [journeys, setJourneys] = React.useState<GoldenJourney[]>([]);
+  const [journeyResults, setJourneyResults] = React.useState<GoldenJourneyResult[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [busy, setBusy] = React.useState('');
   const [error, setError] = React.useState('');
@@ -39,9 +52,14 @@ export function OperationsRecoveryPanel() {
     setLoading(true);
     setError('');
     try {
-      const [nextSnapshot, nextBackups] = await Promise.all([operationsApi.snapshot(), operationsApi.backups()]);
+      const [nextSnapshot, nextBackups, nextReadiness, nextJourneys] = await Promise.all([
+        operationsApi.snapshot(), operationsApi.backups(), operationsApi.readiness(), operationsApi.goldenJourneys(),
+      ]);
       setSnapshot(nextSnapshot);
       setBackups(nextBackups);
+      setReadiness(nextReadiness);
+      setJourneys(nextJourneys.items || []);
+      setJourneyResults(nextJourneys.last_results || nextReadiness.journeys || []);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : t('operations.loadFailed'));
     } finally {
@@ -57,6 +75,21 @@ export function OperationsRecoveryPanel() {
       const backup = await operationsApi.createBackup();
       setBackups(current => [backup, ...current.filter(item => item.backup_id !== backup.backup_id)]);
       toast.success(t('operations.backupCreated'));
+    } catch (actionError) {
+      toast.error(actionError instanceof Error ? actionError.message : t('operations.actionFailed'));
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const runGoldenJourneys = async () => {
+    setBusy('journeys');
+    try {
+      const results = await operationsApi.runGoldenJourneys();
+      setJourneyResults(results);
+      const nextReadiness = await operationsApi.readiness();
+      setReadiness(nextReadiness);
+      toast.success(t('operations.goldenCompleted'));
     } catch (actionError) {
       toast.error(actionError instanceof Error ? actionError.message : t('operations.actionFailed'));
     } finally {
@@ -110,6 +143,21 @@ export function OperationsRecoveryPanel() {
         <Summary icon={Timer} label={t('operations.p95')} value={snapshot.slo ? `${snapshot.slo.p95_latency_ms} ms` : '—'} />
         <Summary icon={CheckCircle2} label={t('operations.availability')} value={snapshot.slo ? `${(snapshot.slo.availability * 100).toFixed(3)}%` : '—'} />
       </div>
+
+      {readiness && <div className="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+        <div className="flex flex-col justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-4 md:flex-row md:items-center">
+          <div><div className="flex items-center gap-2"><ListChecks size={16} className="text-sky-600" /><h4 className="text-xs font-black uppercase tracking-wider text-slate-700">{t('operations.gaReadiness')}</h4><span className={cn('rounded-full border px-2 py-1 text-[9px] font-black', readinessTone[readiness.status])}>{readiness.status}</span></div><p className="mt-1 text-[10px] text-slate-400">{t('operations.gaReadinessHint', { version: readiness.release_version })}</p></div>
+          <button type="button" onClick={() => void runGoldenJourneys()} disabled={busy !== ''} className="flex items-center justify-center gap-2 rounded-xl bg-sky-600 px-3 py-2 text-xs font-black text-white disabled:opacity-40">{busy === 'journeys' ? <Loader2 size={14} className="animate-spin" /> : <PlayCircle size={14} />}{t('operations.runGolden')}</button>
+        </div>
+        <div className="grid gap-4 p-4 xl:grid-cols-[1fr_1.2fr]">
+          <div><h5 className="text-[10px] font-black uppercase tracking-wider text-slate-400">{t('operations.releaseGates')}</h5><div className="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-1">{readiness.checks.map(check => <div key={check.id} className="rounded-xl border border-slate-200 p-3"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><strong className="block truncate font-mono text-[10px] text-slate-700">{check.id}</strong><p className="mt-1 text-[10px] leading-4 text-slate-500">{check.message}</p></div><span className={cn('shrink-0 rounded-full border px-2 py-1 text-[8px] font-black', readinessTone[check.status])}>{check.status}</span></div>{check.evidence?.map(item => <p key={`${item.kind}:${item.reference}`} className="mt-2 truncate font-mono text-[8px] text-sky-600">{item.kind}: {item.reference}</p>)}</div>)}</div></div>
+          <div><div className="flex items-center justify-between"><h5 className="text-[10px] font-black uppercase tracking-wider text-slate-400">{t('operations.goldenJourneys')}</h5><span className="text-[9px] text-slate-400">{t('operations.preflightOnly')}</span></div><div className="mt-2 max-h-[390px] space-y-2 overflow-y-auto pr-1">{journeys.map(journey => {
+            const result = journeyResults.find(item => item.journey_id === journey.id);
+            const status: GAReadinessStatus = result?.status || 'NOT_RUN';
+            return <div key={journey.id} className="rounded-xl border border-slate-200 p-3"><div className="flex items-start justify-between gap-3"><div><strong className="text-xs text-slate-800">{journey.title}</strong><p className="mt-1 text-[10px] leading-4 text-slate-400">{journey.description}</p></div><span className={cn('shrink-0 rounded-full border px-2 py-1 text-[8px] font-black', readinessTone[status])}>{status}</span></div><div className="mt-2 flex flex-wrap gap-1">{journey.steps.map(step => <span key={step.id} title={step.capability} className="rounded-md bg-slate-100 px-2 py-1 font-mono text-[8px] text-slate-500">{step.capability}</span>)}</div>{result?.steps[0]?.message && <p className="mt-2 text-[9px] text-slate-500">{result.steps[0].message}</p>}</div>;
+          })}</div></div>
+        </div>
+      </div>}
 
       <div className="mt-5 grid gap-5 xl:grid-cols-[360px_1fr]">
         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">

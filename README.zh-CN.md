@@ -2,6 +2,8 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
+GA 运维：[Athena 1.0 Readiness 工作区](docs/ga-readiness-v1.0.zh-CN.md) | [English](docs/ga-readiness-v1.0.md)
+
 Athena Agent UI 是 Athena Agent 平台的浏览器界面。它连接 [`agent-runtime-client`](https://github.com/good-fish-man/agent-runtime-client)，在一个应用中提供 Agent 创建、模型管理、聊天、项目修改、知识库、Skills、语音交互、监控和服务配置。
 
 <p align="center">
