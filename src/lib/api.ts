@@ -38,6 +38,7 @@ import type {
 	ScheduleTrigger,
 	PluginProvider,
 	PluginInvocationTrace,
+	PluginPermissionSet,
 	OperationsSnapshot,
 	BackupManifest,
 	GAReadinessReport,
@@ -509,16 +510,20 @@ export const pluginRegistryApi = {
     const value = await readJson<{ items: PluginProvider[] }>(await apiFetch(`${API_BASE}/plugins`));
     return value.items || [];
   },
-  async install(payload: { manifest: unknown; signature: unknown; sbom: unknown; visibility: 'private' | 'public'; activate: boolean }): Promise<PluginProvider> {
+	async install(payload: { manifest: unknown; signature: unknown; sbom: unknown; files?: Record<string, string>; granted_permissions?: PluginPermissionSet; visibility: 'private' | 'public'; activate: boolean }): Promise<PluginProvider> {
     return readJson<PluginProvider>(await apiFetch(`${API_BASE}/plugins/install`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }));
   },
   async transition(provider: PluginProvider, status: 'ACTIVE' | 'DISABLED' | 'REVOKED', reason = ''): Promise<PluginProvider> {
     const path = `${encodeURIComponent(provider.provider_id)}/${encodeURIComponent(provider.version)}`;
     return readJson<PluginProvider>(await apiFetch(`${API_BASE}/plugins/${path}/status`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status, reason, expected_revision: provider.revision }) }));
   },
-  async approve(provider: PluginProvider): Promise<PluginProvider> {
-    const path = `${encodeURIComponent(provider.provider_id)}/${encodeURIComponent(provider.version)}`;
-    return readJson<PluginProvider>(await apiFetch(`${API_BASE}/plugins/${path}/review`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scan_status: 'PASSED', review_status: 'APPROVED', expected_revision: provider.revision }) }));
+	async approve(provider: PluginProvider): Promise<PluginProvider> {
+		const path = `${encodeURIComponent(provider.provider_id)}/${encodeURIComponent(provider.version)}`;
+		return readJson<PluginProvider>(await apiFetch(`${API_BASE}/plugins/${path}/review`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ review_status: 'APPROVED', expected_revision: provider.revision }) }));
+	},
+	async scan(provider: PluginProvider): Promise<PluginProvider> {
+		const path = `${encodeURIComponent(provider.provider_id)}/${encodeURIComponent(provider.version)}`;
+		return readJson<PluginProvider>(await apiFetch(`${API_BASE}/plugins/${path}/scan`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expected_revision: provider.revision }) }));
   },
   async reload(): Promise<Record<string, unknown>> {
     return readJson<Record<string, unknown>>(await apiFetch(`${API_BASE}/plugins/reload`, { method: 'POST' }));

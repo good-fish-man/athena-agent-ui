@@ -320,10 +320,27 @@ export interface PluginProviderManifest {
   version: string;
   description: string;
   min_runtime_version: string;
-  capabilities: Array<{ id: string; description: string; read_only: boolean; risk: DeploymentRisk; observation_contract: string }>;
-  permissions: PluginPermissionSet;
-  risk_floor: DeploymentRisk;
-  resources: { max_execution_ms: number; max_input_bytes: number; max_output_bytes: number; max_concurrency: number; max_memory_mb: number; max_cpu_millis: number };
+	capabilities: Array<{ id: string; description: string; input_schema: Record<string, unknown>; output_schema: Record<string, unknown>; read_only: boolean; risk: DeploymentRisk; observation_contract: string }>;
+	permissions: PluginPermissionSet;
+	risk_floor: DeploymentRisk;
+	resources: { max_execution_ms: number; max_input_bytes: number; max_output_bytes: number; max_concurrency: number; max_memory_mb: number; max_cpu_millis: number };
+	health_check: { operation: string; timeout_ms: number; input: Record<string, unknown> };
+	runtime: { kind: 'http_json' | 'static_json'; base_url?: string };
+	package: { assets: Array<{ path: string; kind: 'schema' | 'knowledge' | 'skill' | 'runtime' | 'test'; sha256: string; size_bytes: number }> };
+}
+
+export interface PluginScanReport {
+	schema: 'athena.plugin-scan.v1';
+	scan_id: string;
+	provider_id: string;
+	version: string;
+	manifest_sha256: string;
+	payload_sha256: string;
+	scanner_version: string;
+	status: 'PASSED' | 'FAILED';
+	checks: Array<{ name: string; passed: boolean; message?: string }>;
+	findings: Array<{ severity: 'INFO' | 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'; code: string; message: string; path?: string }>;
+	scanned_at: string;
 }
 
 export interface PluginProvider {
@@ -333,8 +350,14 @@ export interface PluginProvider {
   description: string;
   status: 'INSTALLED' | 'ACTIVE' | 'DISABLED' | 'REVOKED' | 'QUARANTINED';
   visibility: 'private' | 'public';
-  manifest_sha256: string;
-  scan_status: 'PENDING' | 'PASSED' | 'FAILED';
+	manifest_sha256: string;
+	payload_sha256: string;
+	scan_status: 'PENDING' | 'PASSED' | 'FAILED';
+	scan_report_sha256: string;
+	scanned_at: number;
+	scan_report: PluginScanReport;
+	granted_permissions: PluginPermissionSet;
+	granted_resources: PluginProviderManifest['resources'];
   review_status: 'PENDING' | 'APPROVED' | 'REJECTED';
   review_notes?: string;
   approved_by?: string;
@@ -349,9 +372,18 @@ export interface PluginInvocationTrace {
   invocation_id: string;
   provider_id: string;
   provider_version: string;
-  capability_id: string;
-  trace_id: string;
-  status: 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'DENIED';
+	capability_id: string;
+	owner_id?: string;
+	task_id?: string;
+	trace_id: string;
+	status: 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'DENIED' | 'UNAVAILABLE';
+	manifest_sha256: string;
+	permission_snapshot: PluginPermissionSet;
+	resource_snapshot: PluginProviderManifest['resources'];
+	input_sha256: string;
+	output_sha256?: string;
+	observation_ref?: string;
+	observation_sha256?: string;
   error_code?: string;
   started_at: string;
   duration_ms: number;
