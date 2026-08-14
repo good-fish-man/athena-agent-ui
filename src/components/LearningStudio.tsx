@@ -298,6 +298,8 @@ export function LearningStudio({ experiences }: { experiences: ExperienceRecord[
                       <ReviewMetric label={t('learning.siteScopes')} value={String(new Set(candidate.evidence.contexts.map(item => item.site_scope)).size)} />
                       <ReviewMetric label={t('learning.failureConditions')} value={String(new Set(candidate.evidence.contexts.map(item => item.failure_condition).filter(Boolean)).size)} />
                       <ReviewMetric label={t('learning.riskCeiling')} value={artifact?.risk_ceiling || '—'} />
+                      {candidate.reviewed_by && <ReviewMetric label={t('learning.reviewedBy')} value={candidate.reviewed_by} />}
+                      {candidate.reviewed_at && <ReviewMetric label={t('learning.reviewedAt')} value={new Date(candidate.reviewed_at).toLocaleString()} />}
                     </div>
                     <div className="mt-3 flex flex-wrap gap-2">{candidate.evidence.contexts.map(context => <span key={context.experience_id} className={cn('rounded-full border px-2.5 py-1 font-mono text-[9px]', context.outcome === 'FAILED' ? 'border-red-200 bg-red-50 text-red-700' : 'border-sky-200 bg-sky-50 text-sky-700')}>{context.environment_fingerprint} · {context.site_scope}{context.failure_condition ? ` · ${context.failure_condition}` : ''}</span>)}</div>
                     <div className="mt-4 grid gap-4 lg:grid-cols-2">

@@ -244,6 +244,8 @@ export interface LearningCandidate {
     passed: boolean;
   };
   review_note?: string;
+  reviewed_by?: string;
+  reviewed_at?: string;
   revision: number;
   trace_id?: string;
   created_at: string;
