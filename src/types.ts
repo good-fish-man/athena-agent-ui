@@ -345,6 +345,77 @@ export interface PluginInvocationTrace {
   duration_ms: number;
 }
 
+export type OperationsHealthStatus = 'HEALTHY' | 'DEGRADED' | 'UNHEALTHY';
+
+export interface OperationsHealthCheck {
+  name: string;
+  status: OperationsHealthStatus;
+  latency_ms: number;
+  message?: string;
+}
+
+export interface OperationsHealthSnapshot {
+  schema: 'athena.operations.v1';
+  component: string;
+  version: string;
+  instance_id: string;
+  status: OperationsHealthStatus;
+  uptime_ms: number;
+  inflight: number;
+  queue_depth: number;
+  checks: OperationsHealthCheck[];
+  observed_at: string;
+}
+
+export interface OperationsSLOSnapshot {
+  schema: 'athena.operations.v1';
+  component: string;
+  window_start: string;
+  window_end: string;
+  requests: number;
+  errors: number;
+  availability: number;
+  p95_latency_ms: number;
+  dropped_events: number;
+  duplicate_irreversible_effects: number;
+  upgrade_attempts: number;
+  upgrade_successes: number;
+}
+
+export interface OperationsSnapshot {
+  schema: 'athena.operations.v1';
+  health: OperationsHealthSnapshot;
+  runtime_health?: OperationsHealthSnapshot;
+  slo?: OperationsSLOSnapshot;
+  online_devices: number;
+  total_devices: number;
+  recovery_managed: boolean;
+  observed_at: string;
+}
+
+export interface BackupArtifact {
+  name: string;
+  relative_path: string;
+  sha256: string;
+  size_bytes: number;
+  classification: string;
+  encrypted: boolean;
+}
+
+export interface BackupManifest {
+  schema: 'athena.operations.v1';
+  backup_id: string;
+  source_version: string;
+  protocol_version: string;
+  status: 'CREATING' | 'COMPLETE' | 'FAILED' | 'VERIFIED';
+  artifacts: BackupArtifact[];
+  database_engine: string;
+  database_version: string;
+  created_at: string;
+  completed_at?: string;
+  manifest_sha256: string;
+}
+
 export interface AgentBuild {
   schema: 'athena.deployment.v1';
   build_id: string;

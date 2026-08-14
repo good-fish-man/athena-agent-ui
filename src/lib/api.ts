@@ -36,6 +36,8 @@ import type {
 	GoalCheckpoint,
 	PluginProvider,
 	PluginInvocationTrace,
+	OperationsSnapshot,
+	BackupManifest,
 } from '../types';
 import {
   ATHENA_PROTOCOL,
@@ -440,6 +442,28 @@ export const deploymentApi = {
     if (agentId) query.set('agent_id', agentId);
     const value = await readJson<{ items: DeploymentRollback[] }>(await apiFetch(`${API_BASE}/deployment/rollbacks?${query}`));
     return value.items || [];
+  },
+};
+
+export const operationsApi = {
+  async snapshot(): Promise<OperationsSnapshot> {
+    return readJson<OperationsSnapshot>(await apiFetch(`${API_BASE}/operations/health`));
+  },
+  async backups(): Promise<BackupManifest[]> {
+    const value = await readJson<{ items: BackupManifest[] }>(await apiFetch(`${API_BASE}/operations/backups`));
+    return value.items || [];
+  },
+  async createBackup(): Promise<BackupManifest> {
+    return readJson<BackupManifest>(await apiFetch(`${API_BASE}/operations/backups`, { method: 'POST' }));
+  },
+  async verifyBackup(backupId: string): Promise<BackupManifest> {
+    return readJson<BackupManifest>(await apiFetch(`${API_BASE}/operations/backups/${encodeURIComponent(backupId)}/verify`, { method: 'POST' }));
+  },
+  async restoreBackup(backup: BackupManifest, validateOnly: boolean, confirmation = ''): Promise<{ backup: BackupManifest; validate_only: boolean; restored: boolean }> {
+    return readJson(await apiFetch(`${API_BASE}/operations/backups/${encodeURIComponent(backup.backup_id)}/restore`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expected_sha256: backup.manifest_sha256, validate_only: validateOnly, confirmation }),
+    }));
   },
 };
 
