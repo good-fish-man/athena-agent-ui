@@ -11,6 +11,7 @@ import {
   Eraser,
   FlaskConical,
   Gauge,
+  GraduationCap,
   History,
   Loader2,
   LockKeyhole,
@@ -27,6 +28,7 @@ import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { experienceApi } from '../lib/api';
 import { cn } from '../lib/utils';
+import { LearningStudio } from './LearningStudio';
 import type {
   EvaluationFixture,
   EvaluationResult,
@@ -40,7 +42,7 @@ import type {
   ExperienceStatus,
 } from '../types';
 
-type WorkspaceTab = 'experience' | 'evaluation';
+type WorkspaceTab = 'experience' | 'evaluation' | 'learning';
 
 const defaultStats: ExperienceStats = {
   total: 0,
@@ -356,6 +358,9 @@ export function ExperienceLab() {
             <button type="button" onClick={() => setTab('evaluation')} className={cn('flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-bold transition', tab === 'evaluation' ? 'bg-white text-slate-950' : 'text-slate-400 hover:text-white')}>
               <FlaskConical size={15} /> {t('experience.evaluation')}
             </button>
+            <button type="button" onClick={() => setTab('learning')} className={cn('flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-bold transition', tab === 'learning' ? 'bg-white text-slate-950' : 'text-slate-400 hover:text-white')}>
+              <GraduationCap size={15} /> {t('experience.learningStudio')}
+            </button>
           </div>
         </div>
       </header>
@@ -469,7 +474,7 @@ export function ExperienceLab() {
               )}
             </section>
           </>
-        ) : (
+        ) : tab === 'evaluation' ? (
           <EvaluationWorkspace
             fixtures={fixtures}
             suites={suites}
@@ -485,6 +490,8 @@ export function ExperienceLab() {
             onRunSuite={runSuite}
             onShowResults={showResults}
           />
+        ) : (
+          <LearningStudio experiences={items} />
         )}
       </main>
     </div>

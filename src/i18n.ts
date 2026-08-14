@@ -185,7 +185,7 @@ const resources = {
       experience: {
         title: 'Experience & Evaluation',
         subtitle: 'Inspect sanitized task history, control retention, and replay deterministic offline evaluations without changing production behavior.',
-        library: 'Experience library', evaluation: 'Evaluation lab', total: 'Total records', ready: 'Ready', redactions: 'Redactions', evalRuns: 'Evaluation runs', passRate: 'Pass rate',
+        library: 'Experience library', evaluation: 'Evaluation lab', learningStudio: 'Learning gate', total: 'Total records', ready: 'Ready', redactions: 'Redactions', evalRuns: 'Evaluation runs', passRate: 'Pass rate',
         learningControl: 'Learning controls', learningControlHint: 'Athena writes only sanitized summaries. Credentials, cookies, raw DOM, screenshots, attachments, and private model reasoning are never stored here.',
         learning: 'Experience generation', enabled: 'Enabled', disabled: 'Disabled', retention: 'Retention (days)', maxSensitivity: 'Maximum sensitivity', savePreference: 'Save controls', preferenceSaved: 'Learning controls saved',
         searchPlaceholder: 'Search goals, decisions, capabilities, or failure classes...', anyStatus: 'Any status', anyOutcome: 'Any outcome', anySensitivity: 'Any sensitivity', refresh: 'Refresh', records: '{{count}} records', historicalOnly: 'Historical evidence only',
@@ -197,6 +197,20 @@ const resources = {
         offlineOnly: 'Strict offline boundary', offlineOnlyHint: 'Evaluation cannot contact Launcher, browsers, devices, accounts, or the public network. It uses deterministic simulators and seed 42.', suites: 'Evaluation suites', suitesHint: 'Group fixtures into repeatable regression gates.', noSuites: 'No suites yet', noSuitesHint: 'Select one or more fixtures and create your first suite.', fixtureCount: '{{count}} fixtures', runSeed: 'Run deterministic replay', runCompleted: 'Evaluation completed', runFailed: 'Evaluation failed',
         runHistory: 'Run history', runHistoryHint: 'Candidate and baseline metrics remain reproducible for the same fixture and seed.', noRuns: 'No evaluation runs', noRunsHint: 'Run a suite to establish the first offline baseline.', correctness: 'Correctness', safety: 'Safety', resultsFailed: 'Failed to load evaluation results',
         loadFailed: 'Failed to load experience workspace', saveFailed: 'Failed to save learning controls'
+      },
+      learning: {
+        title: 'Candidate learning & human review',
+        subtitle: 'Turn repeated, sanitized experiences into declarative Skill or Strategy candidates. Static policy, offline replay, and a human decision are required before a version can be made available.',
+        candidateInbox: 'Candidate inbox', demonstrations: 'Demonstrations', noAutoActivation: 'Approval creates an immutable version only. Existing Agents and production behavior never change automatically.',
+        proposeSkill: 'Propose a Skill candidate', proposeHint: 'Athena finds a repeated semantic action pattern, includes failure counterexamples, validates registered capabilities, and runs a deterministic offline suite.',
+        skillID: 'Skill ID (optional)', description: 'Description (optional)', evidenceSelection: 'Experience evidence', evidenceGate: 'Gate: at least 4 independent experiences, 2 matching successes, and 1 failed counterexample.', validateAndPropose: 'Validate, evaluate & propose',
+        generated: 'Candidate is ready for human review', generateFailed: 'Could not generate a safe candidate', approvedSkills: 'Approved versions', approvedSkillsHint: 'These versions remain manual-only until a later deployment explicitly selects them.', noApprovedSkills: 'No approved declarative Skills yet.',
+        reviewQueue: 'Human review queue', reviewQueueHint: 'Inspect evidence, confidence, baseline delta, risk composition, and the exact declarative diff.', pending: 'pending', empty: 'No learning candidates', emptyHint: 'Select sufficient supporting and counterexample experiences, then propose a candidate.',
+        offlineScore: 'offline score', samples: 'Samples', confidence: '95% confidence', baselineDelta: 'Baseline delta', counterexamples: 'Counterexamples', riskCeiling: 'Risk ceiling', behaviorDiff: 'Declarative behavior diff', before: 'Before', noInstalledBehavior: 'No learned behavior is installed or active.', afterApproval: 'After approval', evidenceTrail: 'Evidence trail', loadingEvidence: 'Loading evidence…',
+        reviewNote: 'Reviewer note', edit: 'Edit declarative JSON', reevaluate: 'Re-evaluate', declarativeOnly: 'Only the declarative definition is editable. Registered-capability, permission, risk, and code-execution gates run again before saving.', editSaved: 'Candidate edit passed static validation', editFailed: 'Candidate edit was rejected', reevaluated: 'A new immutable evaluation was appended', reevaluateFailed: 'Candidate could not be re-evaluated', reject: 'Reject', approve: 'Approve version', approved: 'Candidate approved as an immutable version', rejected: 'Candidate rejected', reviewFailed: 'Review could not be saved',
+        startDemonstration: 'Start explicit demonstration', demonstrationHint: 'Bind the demonstration to an existing task. Athena stores semantic capabilities and operations only, never raw keys, passwords, or typed credential values.', taskID: 'Task ID', demonstrationTitle: 'Demonstration title', sensitivePause: 'Password, token, cookie, OTP, and 2FA fields pause recording and become a redacted placeholder.', startExplicitly: 'Start recording explicitly', demonstrationHistory: 'Private demonstration history', privateByDefault: 'Private by default · preview, edit, and confirm before reuse', noDemonstrations: 'No demonstrations recorded yet.', demonstrationStarted: 'Demonstration recording started', demonstrationFailed: 'Demonstration action failed',
+        demonstrationActions: { resume: 'Resume', preview: 'Build preview', confirm: 'Confirm', discard: 'Discard', resumeDone: 'Recording resumed', previewDone: 'Preview created', confirmDone: 'Demonstration confirmed', discardDone: 'Demonstration discarded' },
+        loadFailed: 'Failed to load the learning gate'
       },
       websiteAccounts: {
         title: 'Website Accounts', subtitle: 'Save low-risk website credentials in the encrypted local Auth Vault and let Agents receive only authenticated browser sessions.',
@@ -1123,7 +1137,7 @@ const resources = {
       experience: {
         title: '经验与评测',
         subtitle: '查看经过脱敏的任务经验、控制保留策略，并进行确定性的离线回放；不会自动改变生产行为。',
-        library: '经验库', evaluation: '评测实验室', total: '记录总数', ready: '可用经验', redactions: '脱敏次数', evalRuns: '评测次数', passRate: '通过率',
+        library: '经验库', evaluation: '评测实验室', learningStudio: '学习门禁', total: '记录总数', ready: '可用经验', redactions: '脱敏次数', evalRuns: '评测次数', passRate: '通过率',
         learningControl: '学习控制', learningControlHint: 'Athena 只保存脱敏摘要。凭据、Cookie、原始 DOM、截图、附件及模型私有推理不会写入经验库。',
         learning: '经验生成', enabled: '已启用', disabled: '已停用', retention: '保留天数', maxSensitivity: '最高敏感级别', savePreference: '保存控制项', preferenceSaved: '学习控制已保存',
         searchPlaceholder: '搜索目标、决策、能力或失败分类...', anyStatus: '全部状态', anyOutcome: '全部结果', anySensitivity: '全部敏感级别', refresh: '刷新', records: '共 {{count}} 条', historicalOnly: '仅作为历史证据',
@@ -1135,6 +1149,20 @@ const resources = {
         offlineOnly: '严格离线边界', offlineOnlyHint: '评测不会访问 Launcher、浏览器、设备、账号或公网，只使用确定性模拟器和固定种子 42。', suites: '评测套件', suitesHint: '将用例组合为可重复执行的回归门禁。', noSuites: '还没有套件', noSuitesHint: '选择一个或多个用例，创建首个套件。', fixtureCount: '{{count}} 个用例', runSeed: '执行确定性回放', runCompleted: '评测执行完成', runFailed: '评测执行失败',
         runHistory: '运行历史', runHistoryHint: '相同用例与种子下，候选版本和基线指标可重复验证。', noRuns: '还没有评测记录', noRunsHint: '运行一个套件以建立首个离线基线。', correctness: '正确率', safety: '安全性', resultsFailed: '加载评测结果失败',
         loadFailed: '加载经验工作区失败', saveFailed: '保存学习控制失败'
+      },
+      learning: {
+        title: '候选学习与人工评审',
+        subtitle: '将重复出现的脱敏经验提炼为声明式 Skill 或 Strategy 候选。只有通过静态策略、离线回放和人工决定后，才能生成可用版本。',
+        candidateInbox: '候选收件箱', demonstrations: '人工演示', noAutoActivation: '批准只会创建不可变版本，不会自动修改现有 Agent 或生产行为。',
+        proposeSkill: '提出 Skill 候选', proposeHint: 'Athena 会识别重复语义动作模式，纳入失败反例，验证已注册能力，并执行确定性的离线评测。',
+        skillID: 'Skill ID（可选）', description: '描述（可选）', evidenceSelection: '经验依据', evidenceGate: '门槛：至少 4 条独立经验、2 条相同模式的成功记录和 1 条失败反例。', validateAndPropose: '校验、评测并提交候选',
+        generated: '候选已进入人工评审', generateFailed: '无法生成安全候选', approvedSkills: '已批准版本', approvedSkillsHint: '这些版本保持手动可用，后续部署明确选择前不会生效。', noApprovedSkills: '还没有已批准的声明式 Skill。',
+        reviewQueue: '人工评审队列', reviewQueueHint: '检查证据、置信区间、基线增量、组合风险和完整声明式差异。', pending: '待处理', empty: '还没有学习候选', emptyHint: '选择足够的成功依据和失败反例，然后提出候选。',
+        offlineScore: '离线得分', samples: '样本数', confidence: '95% 置信区间', baselineDelta: '相对基线', counterexamples: '失败反例', riskCeiling: '风险上限', behaviorDiff: '声明式行为差异', before: '批准前', noInstalledBehavior: '没有安装或启用任何学习行为。', afterApproval: '批准后', evidenceTrail: '证据链', loadingEvidence: '正在加载证据…',
+        reviewNote: '评审意见', edit: '编辑声明式 JSON', reevaluate: '重新评测', declarativeOnly: '只能编辑声明式定义；保存前会重新执行能力注册、权限、风险和代码执行门禁。', editSaved: '候选编辑已通过静态校验', editFailed: '候选编辑被安全门禁拒绝', reevaluated: '已追加一次不可变评测', reevaluateFailed: '无法重新评测候选', reject: '拒绝', approve: '批准版本', approved: '候选已批准为不可变版本', rejected: '候选已拒绝', reviewFailed: '无法保存评审结果',
+        startDemonstration: '显式开始人工演示', demonstrationHint: '将演示绑定到已有任务。Athena 只保存语义能力与操作，不保存原始按键、密码或输入的凭据值。', taskID: '任务 ID', demonstrationTitle: '演示标题', sensitivePause: '密码、Token、Cookie、OTP 和 2FA 字段会暂停记录，并替换为脱敏占位符。', startExplicitly: '显式开始记录', demonstrationHistory: '私有演示历史', privateByDefault: '默认私有 · 使用前先预览、编辑并确认', noDemonstrations: '还没有人工演示。', demonstrationStarted: '人工演示已开始记录', demonstrationFailed: '演示操作失败',
+        demonstrationActions: { resume: '继续记录', preview: '生成预览', confirm: '确认', discard: '丢弃', resumeDone: '已继续记录', previewDone: '预览已生成', confirmDone: '演示已确认', discardDone: '演示已丢弃' },
+        loadFailed: '加载学习门禁失败'
       },
       websiteAccounts: {
         title: '网站账号', subtitle: '将低风险网站账号保存在本机加密 Auth Vault 中，Agent 只能获得认证后的浏览器会话。',

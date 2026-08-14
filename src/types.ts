@@ -171,6 +171,122 @@ export interface EvaluationResult {
   created_at: string;
 }
 
+export type LearningCandidateKind = 'SKILL' | 'STRATEGY';
+export type LearningLifecycle = 'DRAFT' | 'VALIDATING' | 'EVALUATING' | 'REVIEW_REQUIRED' | 'APPROVED_FOR_USE' | 'REJECTED' | 'DEPRECATED' | 'RETIRED';
+
+export interface DeclarativeSkill {
+  id: string;
+  version: string;
+  description: string;
+  required_capabilities: string[];
+  task_graph_template: {
+    steps: Array<{ id: string; capability: string; operation: string; arguments?: Record<string, unknown>; depends_on?: string[] }>;
+  };
+  verification_rules: Array<{ field: string; operator: string; expected?: unknown; evidence_required: boolean }>;
+  risk_ceiling: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  evaluation_suite: { suite_id: string; minimum_sample: number; minimum_score: number };
+  owner_id: string;
+  visibility: 'PRIVATE' | 'TEAM' | 'PUBLIC';
+  lifecycle_state: LearningLifecycle;
+  input_schema: Record<string, unknown>;
+  output_schema: Record<string, unknown>;
+}
+
+export interface DeclarativeStrategy {
+  id: string;
+  version: string;
+  description: string;
+  condition: Array<{ field: string; operator: string; value?: unknown }>;
+  preferred_skill: string;
+  fallback_order?: string[];
+  observation_policy: { required_fields?: string[]; require_evidence: boolean };
+  retry_budget: { max_attempts: number; max_duration_ms: number };
+  verification_policy: Array<{ field: string; operator: string; expected?: unknown; evidence_required: boolean }>;
+  risk_ceiling: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  owner_id: string;
+  visibility: 'PRIVATE' | 'TEAM' | 'PUBLIC';
+  lifecycle_state: LearningLifecycle;
+}
+
+export interface LearningCandidate {
+  schema: 'athena.learning.v1';
+  candidate_id: string;
+  owner_id: string;
+  kind: LearningCandidateKind;
+  status: LearningLifecycle;
+  skill?: DeclarativeSkill;
+  strategy?: DeclarativeStrategy;
+  evidence: {
+    experience_ids: string[];
+    success_count: number;
+    failure_count: number;
+    counterexamples: number;
+    pattern: string;
+  };
+  evaluation: {
+    run_id?: string;
+    sample_size: number;
+    success_rate: number;
+    baseline_rate: number;
+    delta: number;
+    safety_score: number;
+    confidence: { lower: number; upper: number; level: number };
+    passed: boolean;
+  };
+  review_note?: string;
+  revision: number;
+  trace_id?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LearningCandidateEvidence {
+  evidence_id: string;
+  candidate_id: string;
+  experience_id: string;
+  relation: 'SUPPORTING_SUCCESS' | 'FAILURE_COUNTEREXAMPLE' | string;
+  outcome: ExperienceOutcome;
+  summary: string;
+  trace_id?: string;
+  created_at: string;
+}
+
+export interface LearningCandidateEvaluation {
+  evaluation_id: string;
+  candidate_id: string;
+  run_id: string;
+  summary: LearningCandidate['evaluation'];
+  created_at: string;
+}
+
+export interface LearnedSkill {
+  skill_id: string;
+  owner_id: string;
+  latest_version: string;
+  status: LearningLifecycle;
+  visibility: 'PRIVATE' | 'TEAM' | 'PUBLIC';
+  definition: DeclarativeSkill;
+  revision: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Demonstration {
+  schema: 'athena.learning.v1';
+  demonstration_id: string;
+  owner_id: string;
+  task_id: string;
+  status: 'RECORDING' | 'PAUSED_SENSITIVE' | 'PREVIEW' | 'CONFIRMED' | 'DISCARDED';
+  title: string;
+  steps: Array<{ sequence: number; capability: string; operation: string; summary: string; redacted: boolean }>;
+  pause_count: number;
+  confirmed_by?: string;
+  revision: number;
+  trace_id?: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Agent {
   ulid?: string;
   id: string;

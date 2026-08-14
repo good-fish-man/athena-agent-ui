@@ -13,6 +13,11 @@ import type {
   ExperienceSensitivity,
   ExperienceStats,
   ExperienceStatus,
+  Demonstration,
+  LearnedSkill,
+  LearningCandidate,
+  LearningCandidateEvidence,
+  LearningCandidateEvaluation,
 } from '../types';
 import {
   ATHENA_PROTOCOL,
@@ -207,6 +212,67 @@ export const experienceApi = {
   async results(runId: string): Promise<EvaluationResult[]> {
     const result = await readJson<{ items: EvaluationResult[] }>(await apiFetch(`${API_BASE}/evaluation/runs/${encodeURIComponent(runId)}/results`));
     return result.items || [];
+  },
+};
+
+export const learningApi = {
+  async candidates(params: { kind?: string; status?: string; limit?: number; offset?: number } = {}): Promise<{ items: LearningCandidate[]; total: number }> {
+    const query = new URLSearchParams();
+    if (params.kind) query.set('kind', params.kind);
+    if (params.status) query.set('status', params.status);
+    query.set('limit', String(params.limit || 50));
+    query.set('offset', String(params.offset || 0));
+    return readJson(await apiFetch(`${API_BASE}/learning/candidates?${query}`));
+  },
+  async candidate(id: string): Promise<{ candidate: LearningCandidate; evidence: LearningCandidateEvidence[]; evaluations: LearningCandidateEvaluation[] }> {
+    return readJson(await apiFetch(`${API_BASE}/learning/candidates/${encodeURIComponent(id)}`));
+  },
+  async generate(request: { kind: 'SKILL' | 'STRATEGY'; id?: string; description?: string; experience_ids?: string[]; minimum_score?: number; preferred_skill?: string }): Promise<LearningCandidate> {
+    return readJson(await apiFetch(`${API_BASE}/learning/candidates/generate`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request),
+    }));
+  },
+  async review(id: string, request: { decision: 'APPROVE' | 'REJECT'; note?: string; expected_revision: number }): Promise<LearningCandidate> {
+    return readJson(await apiFetch(`${API_BASE}/learning/candidates/${encodeURIComponent(id)}/review`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request),
+    }));
+  },
+  async update(id: string, candidate: LearningCandidate): Promise<LearningCandidate> {
+    return readJson(await apiFetch(`${API_BASE}/learning/candidates/${encodeURIComponent(id)}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ skill: candidate.skill, strategy: candidate.strategy, expected_revision: candidate.revision }),
+    }));
+  },
+  async reevaluate(id: string, expectedRevision: number): Promise<LearningCandidate> {
+    return readJson(await apiFetch(`${API_BASE}/learning/candidates/${encodeURIComponent(id)}/re-evaluate`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expected_revision: expectedRevision }),
+    }));
+  },
+  async skills(): Promise<LearnedSkill[]> {
+    const value = await readJson<{ items: LearnedSkill[]; activation: 'manual_only' }>(await apiFetch(`${API_BASE}/learning/skills`));
+    return value.items || [];
+  },
+  async demonstrations(): Promise<Demonstration[]> {
+    const value = await readJson<{ items: Demonstration[] }>(await apiFetch(`${API_BASE}/learning/demonstrations`));
+    return value.items || [];
+  },
+  async startDemonstration(request: { task_id: string; title: string }): Promise<Demonstration> {
+    return readJson(await apiFetch(`${API_BASE}/learning/demonstrations`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request),
+    }));
+  },
+  async resumeDemonstration(id: string): Promise<Demonstration> {
+    return readJson(await apiFetch(`${API_BASE}/learning/demonstrations/${encodeURIComponent(id)}/resume`, { method: 'POST' }));
+  },
+  async previewDemonstration(id: string): Promise<Demonstration> {
+    return readJson(await apiFetch(`${API_BASE}/learning/demonstrations/${encodeURIComponent(id)}/preview`, { method: 'POST' }));
+  },
+  async confirmDemonstration(id: string): Promise<Demonstration> {
+    return readJson(await apiFetch(`${API_BASE}/learning/demonstrations/${encodeURIComponent(id)}/confirm`, { method: 'POST' }));
+  },
+  async discardDemonstration(id: string): Promise<Demonstration> {
+    return readJson(await apiFetch(`${API_BASE}/learning/demonstrations/${encodeURIComponent(id)}/discard`, { method: 'POST' }));
   },
 };
 
