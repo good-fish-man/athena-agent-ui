@@ -812,6 +812,15 @@ export interface GoalCriterion {
   evidence_ref?: string;
 }
 
+export interface GoalTrigger {
+  type: 'INTERACTIVE' | 'SCHEDULE';
+  trigger_id?: string;
+  schedule_id?: string;
+  scheduled_at?: string;
+  max_attempts?: number;
+  retry_backoff_ms?: number;
+}
+
 export interface PersistentGoal {
   schema: 'athena.orchestration.v1';
   goal_id: string;
@@ -824,6 +833,8 @@ export interface PersistentGoal {
   budget: GoalBudget;
   usage: GoalUsage;
   deadline?: string;
+  approval_policy: { require_before_risks: string[]; preauthorization_id?: string; preauthorized_risks?: string[]; expires_at?: string };
+  trigger: GoalTrigger;
   active_task_ids?: string[];
   latest_checkpoint_id?: string;
   status: GoalStatus;
@@ -839,11 +850,17 @@ export interface GoalTask {
   objective: string;
   depends_on?: string[];
   required_capabilities?: string[];
+  world_slice_refs?: string[];
   device_id?: string;
+  execution_id?: string;
+  idempotency_scope: string;
   budget: Omit<GoalBudget, 'max_concurrent_specialists' | 'max_depth'>;
   status: GoalTaskStatus;
   attempt: number;
   depth: number;
+  next_attempt_at?: string;
+  started_at?: string;
+  completed_at?: string;
   created_at: string;
   updated_at: string;
 }
@@ -858,20 +875,52 @@ export interface GoalCheckpoint {
   confirmed_effect_keys?: string[];
   pending_approval_ids?: string[];
   reason: string;
+  previous_checksum?: string;
   checksum: string;
   created_at: string;
 }
 
 export interface SpecialistResult {
   run_id: string;
+  execution_id: string;
   task_id: string;
   specialist: GoalTask['specialist'];
   status: GoalTaskStatus;
   summary: string;
   evidence_refs?: string[];
+  observation_refs?: string[];
+  confirmed_effect_keys?: string[];
   usage: GoalUsage;
   provenance: { run_manifest_id: string; agent_build_id: string; model_config_version: string; device_id?: string; trace_id: string; produced_at: string };
   created_at: string;
+}
+
+export type ScheduleTriggerStatus = 'QUEUED' | 'RUNNING' | 'WAITING_USER' | 'WAITING_DEVICE' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
+
+export interface ScheduleTrigger {
+  schema: 'athena.orchestration.v1';
+  trigger_id: string;
+  schedule_id: string;
+  owner_id: string;
+  goal_id: string;
+  task_id: string;
+  idempotency_key: string;
+  scheduled_at: string;
+  started_at?: string;
+  finished_at?: string;
+  attempt: number;
+  max_attempts: number;
+  retry_backoff_ms: number;
+  status: ScheduleTriggerStatus;
+  run_id?: string;
+  summary?: string;
+  notify: boolean;
+  notification_status: 'DISABLED' | 'PENDING' | 'SENT' | 'FAILED';
+  notified_at?: string;
+  reconciled_at?: string;
+  error?: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface GoalState {

@@ -35,6 +35,7 @@ import type {
 	PersistentGoal,
 	GoalState,
 	GoalCheckpoint,
+	ScheduleTrigger,
 	PluginProvider,
 	PluginInvocationTrace,
 	OperationsSnapshot,
@@ -386,6 +387,10 @@ export const goalApi = {
   },
   async checkpoints(goalId: string): Promise<GoalCheckpoint[]> {
     const value = await readJson<{ items: GoalCheckpoint[] }>(await apiFetch(`${API_BASE}/goals/${encodeURIComponent(goalId)}/checkpoints?limit=20`));
+    return value.items || [];
+  },
+  async scheduleTriggers(limit = 100): Promise<ScheduleTrigger[]> {
+    const value = await readJson<{ items: ScheduleTrigger[] }>(await apiFetch(`${API_BASE}/goals/schedule-triggers?limit=${limit}`));
     return value.items || [];
   },
 };

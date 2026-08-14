@@ -32,6 +32,8 @@ export interface Action {
   step_id: string;
   action_id: string;
   trace_id?: string;
+  agent_build_id?: string;
+  run_manifest_id?: string;
   decision_id?: string;
   device_id?: string;
   capability_instance_id?: string;
@@ -125,6 +127,8 @@ export interface Observation {
   step_id: string;
   action_id: string;
   trace_id?: string;
+  agent_build_id?: string;
+  run_manifest_id?: string;
   device_id?: string;
   session_id?: string;
   sequence: number;
