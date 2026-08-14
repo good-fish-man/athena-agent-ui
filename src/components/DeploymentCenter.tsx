@@ -137,6 +137,26 @@ export function DeploymentCenter() {
     }
   };
 
+  const evaluateShadow = async (promotion: Promotion) => {
+    setBusy(`shadow:${promotion.promotion_id}`);
+    try {
+      const result = await deploymentApi.evaluateShadow(promotion.promotion_id, {
+        task_id: `release-${promotion.promotion_id}-${Date.now()}`,
+        input: {
+          goal: 'Evaluate the candidate build against the immutable control build before exposure.',
+          agent_id: promotion.agent_id,
+          candidate_build_id: promotion.build_id,
+        },
+      });
+      setShadow(current => ({ ...current, [promotion.promotion_id]: [result, ...(current[promotion.promotion_id] || [])] }));
+      toast.success(t(result.passed ? 'deployment.shadowPassed' : 'deployment.shadowFailed'));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t('deployment.actionFailed'));
+    } finally {
+      setBusy('');
+    }
+  };
+
   const toggleOptOut = async () => {
     if (!selectedAgent || !exposure) return;
     setBusy('experiment');
@@ -200,13 +220,13 @@ export function DeploymentCenter() {
           const isExpanded = expanded === promotion.promotion_id;
           const shadowItems = shadow[promotion.promotion_id] || [];
           const metricItems = metrics[promotion.promotion_id] || [];
-          const running = busy === `promotion:${promotion.promotion_id}`;
+          const running = busy === `promotion:${promotion.promotion_id}` || busy === `shadow:${promotion.promotion_id}`;
           return <article key={promotion.promotion_id}>
             <button type="button" onClick={() => void openPromotion(promotion)} className="flex w-full items-start gap-3 px-5 py-4 text-left hover:bg-slate-50"><span className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-400">{isExpanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}</span><span className="min-w-0 flex-1"><span className="flex flex-wrap items-center gap-2"><strong className="font-mono text-xs text-slate-900">{promotion.build_id}</strong><Status value={promotion.status} /><span className="rounded bg-slate-100 px-2 py-1 text-[9px] font-black text-slate-600">{promotion.risk_level}</span></span><span className="mt-1 block text-[10px] text-slate-400">{promotion.promotion_id} · {promotion.canary_percent}% canary</span></span><span className="text-right text-[10px] text-slate-400">rev {promotion.revision}</span></button>
             {isExpanded && <div className="border-t border-slate-200 bg-slate-50/70 p-5">
               <div className="grid gap-3 sm:grid-cols-3"><Metric label={t('deployment.shadowRuns')} value={String(shadowItems.length)} good={shadowItems.some(item => item.passed)} /><Metric label={t('deployment.canarySamples')} value={String(metricItems[0]?.sample_count || 0)} good={Boolean(metricItems[0] && !metricItems[0].stop_triggered)} /><Metric label={t('deployment.previousBuild')} value={promotion.previous_build_id?.slice(0, 12) || '—'} /></div>
-              <div className="mt-4 flex flex-wrap gap-2">{promotion.status === 'PROPOSED' && <Action icon={ShieldCheck} label={t('deployment.review')} onClick={() => void transition(promotion, 'REVIEWED')} disabled={running} />}{promotion.status === 'REVIEWED' && <Action icon={FlaskConical} label={t('deployment.startShadow')} onClick={() => void transition(promotion, 'SHADOW')} disabled={running} />}{promotion.status === 'SHADOW' && (promotion.risk_level === 'R0' || promotion.risk_level === 'R1' ? <Action icon={Activity} label={t('deployment.startCanary')} onClick={() => void transition(promotion, 'CANARY')} disabled={running || !shadowItems.some(item => item.passed)} /> : <Action icon={ShieldCheck} label={t('deployment.explicitActivate')} onClick={() => void transition(promotion, 'ACTIVE', true)} disabled={running || !shadowItems.some(item => item.passed)} />)}{promotion.status === 'CANARY' && <><Action icon={CheckCircle2} label={t('deployment.activate')} onClick={() => void transition(promotion, 'ACTIVE')} disabled={running || !metricItems.some(item => item.sample_count >= promotion.thresholds.minimum_samples && !item.stop_triggered)} /><Action icon={Pause} label={t('deployment.pause')} onClick={() => void transition(promotion, 'PAUSED')} disabled={running} /></>}{promotion.status === 'ACTIVE' && <Action icon={Pause} label={t('deployment.pause')} onClick={() => void transition(promotion, 'PAUSED')} disabled={running} />}{['ACTIVE', 'CANARY', 'PAUSED'].includes(promotion.status) && promotion.previous_build_id && <Action icon={RotateCcw} label={t('deployment.rollback')} onClick={() => void rollback(promotion)} disabled={running} danger />}{running && <Loader2 size={15} className="animate-spin text-sky-600" />}</div>
-              <div className="mt-4 grid gap-4 lg:grid-cols-2"><EvidenceList title={t('deployment.shadowEvidence')} empty={t('deployment.waitingShadow')} items={shadowItems.map(item => ({ id: item.shadow_id, title: item.passed ? t('deployment.passed') : t('deployment.failed'), detail: `${item.task_id} · ${item.latency_ms}ms · ${item.no_external_side_effects ? t('deployment.noSideEffects') : ''}` }))} /><EvidenceList title={t('deployment.canaryHealth')} empty={t('deployment.waitingMetrics')} items={metricItems.map(item => ({ id: item.metric_id, title: `${Math.round(item.success_rate * 100)}% · ${item.sample_count} samples`, detail: item.stop_triggered ? item.stop_reason || t('deployment.stopped') : `${item.p95_latency_ms}ms p95` }))} /></div>
+              <div className="mt-4 flex flex-wrap gap-2">{promotion.status === 'PROPOSED' && <Action icon={ShieldCheck} label={t('deployment.review')} onClick={() => void transition(promotion, 'REVIEWED')} disabled={running} />}{promotion.status === 'REVIEWED' && <Action icon={FlaskConical} label={t('deployment.startShadow')} onClick={() => void transition(promotion, 'SHADOW')} disabled={running} />}{promotion.status === 'SHADOW' && <Action icon={FlaskConical} label={t('deployment.runShadow')} onClick={() => void evaluateShadow(promotion)} disabled={running} />}{promotion.status === 'SHADOW' && (promotion.risk_level === 'R0' || promotion.risk_level === 'R1' ? <Action icon={Activity} label={t('deployment.startCanary')} onClick={() => void transition(promotion, 'CANARY')} disabled={running || !shadowItems.some(item => item.passed)} /> : <Action icon={ShieldCheck} label={t('deployment.explicitActivate')} onClick={() => void transition(promotion, 'ACTIVE', true)} disabled={running || !shadowItems.some(item => item.passed)} />)}{promotion.status === 'CANARY' && <><Action icon={CheckCircle2} label={t('deployment.activate')} onClick={() => void transition(promotion, 'ACTIVE')} disabled={running || !metricItems.some(item => item.sample_count >= promotion.thresholds.minimum_samples && !item.stop_triggered)} /><Action icon={Pause} label={t('deployment.pause')} onClick={() => void transition(promotion, 'PAUSED')} disabled={running} /></>}{promotion.status === 'ACTIVE' && <Action icon={Pause} label={t('deployment.pause')} onClick={() => void transition(promotion, 'PAUSED')} disabled={running} />}{['ACTIVE', 'CANARY', 'PAUSED'].includes(promotion.status) && promotion.previous_build_id && <Action icon={RotateCcw} label={t('deployment.rollback')} onClick={() => void rollback(promotion)} disabled={running} danger />}{running && <Loader2 size={15} className="animate-spin text-sky-600" />}</div>
+              <div className="mt-4 grid gap-4 lg:grid-cols-2"><EvidenceList title={t('deployment.shadowEvidence')} empty={t('deployment.waitingShadow')} items={shadowItems.map(item => ({ id: item.shadow_id, title: item.passed ? t('deployment.passed') : t('deployment.failed'), detail: `${item.evaluator_version} · ${item.production_build_id.slice(0, 10)} → ${item.candidate_build_id.slice(0, 10)} · ${item.checks.filter(check => check.passed).length}/${item.checks.length} checks · ${item.executed_action_count} executed · ${item.no_external_side_effects ? t('deployment.noSideEffects') : ''}` }))} /><EvidenceList title={t('deployment.canaryHealth')} empty={t('deployment.waitingMetrics')} items={metricItems.map(item => ({ id: item.metric_id, title: `${Math.round(item.success_rate * 100)}% · ${item.sample_count} samples`, detail: item.stop_triggered ? item.stop_reason || t('deployment.stopped') : `${item.p95_latency_ms}ms p95 · sha256:${item.samples_digest?.slice(0, 10) || '—'}` }))} /></div>
             </div>}
           </article>;
         })}</div>}

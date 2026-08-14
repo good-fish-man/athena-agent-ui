@@ -502,10 +502,27 @@ export interface AgentBuild {
   ontology_version: string;
   prompt_template_versions: Record<string, string>;
   evaluation_suite_version: string;
+  artifact_approvals?: ArtifactApprovalReference[];
   risk_level: DeploymentRisk;
+  verified: boolean;
+  recoverable: boolean;
+  trace_id: string;
   checksum: string;
   created_by: string;
   created_at: string;
+}
+
+export interface ArtifactApprovalReference {
+  kind: 'SKILL' | 'STRATEGY';
+  artifact_id: string;
+  version: string;
+  version_id: string;
+  candidate_id: string;
+  evaluation_run_id: string;
+  reviewed_by: string;
+  reviewed_at: string;
+  checksum: string;
+  verified: boolean;
 }
 
 export interface CanaryThresholds {
@@ -548,9 +565,17 @@ export interface DeploymentExposure {
 }
 
 export interface ShadowResult {
+  schema: 'athena.deployment.v1';
   shadow_id: string;
   promotion_id: string;
   task_id: string;
+  trace_id: string;
+  input_digest: string;
+  evaluator_version: string;
+  production_build_id: string;
+  candidate_build_id: string;
+  production_build_hash: string;
+  candidate_build_hash: string;
   production_route_hash: string;
   candidate_route_hash: string;
   production_graph_hash: string;
@@ -561,12 +586,26 @@ export interface ShadowResult {
   candidate_cost_micros: number;
   production_risk: DeploymentRisk;
   candidate_risk: DeploymentRisk;
+  production_planned_actions: number;
+  candidate_planned_actions: number;
+  production_proof: ShadowSideEffectProof;
+  candidate_proof: ShadowSideEffectProof;
+  checks: Array<{ id: string; required: boolean; passed: boolean; detail?: string }>;
   latency_ms: number;
   no_external_side_effects: boolean;
   executed_action_count: number;
   passed: boolean;
   summary?: string;
   created_at: string;
+}
+
+export interface ShadowSideEffectProof {
+  mode: 'PLAN_ONLY';
+  world_writes: number;
+  network_requests: number;
+  device_actions: number;
+  credential_reads: number;
+  proof_digest: string;
 }
 
 export interface CanaryMetric {
@@ -578,8 +617,27 @@ export interface CanaryMetric {
   average_cost_micros: number;
   safety_score: number;
   intervention_rate: number;
+  latest_sample_id: string;
+  samples_digest: string;
   stop_triggered: boolean;
   stop_reason?: string;
+  created_at: string;
+}
+
+export interface CanarySample {
+  schema: 'athena.deployment.v1';
+  sample_id: string;
+  promotion_id: string;
+  manifest_id: string;
+  exposure_id: string;
+  agent_build_id: string;
+  task_id: string;
+  succeeded: boolean;
+  latency_ms: number;
+  cost_micros: number;
+  safety_score: number;
+  intervention: boolean;
+  trace_id: string;
   created_at: string;
 }
 

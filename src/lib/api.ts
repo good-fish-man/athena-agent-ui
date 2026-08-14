@@ -18,6 +18,7 @@ import type {
   Promotion,
   ShadowResult,
   CanaryMetric,
+  CanarySample,
   RunManifest,
   DeploymentRollback,
   DeploymentExposure,
@@ -401,7 +402,7 @@ export const deploymentApi = {
   async propose(buildId: string, canaryPercent = 10): Promise<Promotion> {
     return readJson(await apiFetch(`${API_BASE}/deployment/promotions`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ build_id: buildId, canary_percent: canaryPercent, verified: true, recoverable: true }),
+      body: JSON.stringify({ build_id: buildId, canary_percent: canaryPercent }),
     }));
   },
   async transition(promotion: Promotion, targetStatus: Promotion['status'], explicit = false): Promise<Promotion> {
@@ -412,6 +413,15 @@ export const deploymentApi = {
   },
   async shadow(promotionId: string): Promise<ShadowResult[]> {
     const value = await readJson<{ items: ShadowResult[] }>(await apiFetch(`${API_BASE}/deployment/promotions/${encodeURIComponent(promotionId)}/shadow`));
+    return value.items || [];
+  },
+  async evaluateShadow(promotionId: string, request: { task_id: string; input: Record<string, unknown>; capability_hints?: string[] }): Promise<ShadowResult> {
+    return readJson<ShadowResult>(await apiFetch(`${API_BASE}/deployment/promotions/${encodeURIComponent(promotionId)}/shadow/evaluate`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request),
+    }));
+  },
+  async canarySamples(promotionId: string): Promise<CanarySample[]> {
+    const value = await readJson<{ items: CanarySample[] }>(await apiFetch(`${API_BASE}/deployment/promotions/${encodeURIComponent(promotionId)}/canary-samples`));
     return value.items || [];
   },
   async metrics(promotionId: string): Promise<CanaryMetric[]> {
