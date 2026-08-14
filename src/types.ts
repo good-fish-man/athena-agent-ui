@@ -679,6 +679,7 @@ export interface KnowledgeEvidence {
   schema: 'athena.knowledge.v1';
   evidence_id: string;
   owner_id: string;
+  organization_id?: string;
   scope: 'USER' | 'ORGANIZATION' | 'PUBLIC';
   sensitivity: 'PUBLIC' | 'INTERNAL' | 'SENSITIVE' | 'RESTRICTED';
   source_type: 'OFFICIAL' | 'RESEARCH' | 'PAGE_OBSERVATION' | 'USER_CONFIRMATION';
@@ -690,6 +691,9 @@ export interface KnowledgeEvidence {
   freshness: number;
   published_at?: string;
   observed_at: string;
+  stale_at?: string;
+  trust_profile: string;
+  access_verified_at: string;
   provenance: KnowledgeProvenance;
 }
 
@@ -697,6 +701,7 @@ export interface KnowledgeClaim {
   schema: 'athena.knowledge.v1';
   claim_id: string;
   owner_id: string;
+  organization_id?: string;
   subject: string;
   predicate: string;
   value: string;
@@ -708,6 +713,7 @@ export interface KnowledgeClaim {
   valid_from?: string;
   valid_until?: string;
   contradicted_by?: string[];
+  relations?: Array<{ predicate: string; target_claim_id: string; weight: number }>;
   status: 'ACTIVE' | 'EXPIRED' | 'CONTRADICTED' | 'RETRACTED';
   provenance: KnowledgeProvenance;
   created_at: string;
@@ -716,22 +722,35 @@ export interface KnowledgeClaim {
 
 export interface KnowledgeContradiction {
   contradiction_id: string;
+  subject: string;
+  predicate: string;
   claim_ids: string[];
   evidence_refs: string[];
   severity: string;
   summary: string;
   resolved: boolean;
-  resolution?: string;
+  resolution?: {
+    decision: 'KEEP_CLAIM' | 'MARK_UNCERTAIN' | 'RETRACT_ALL';
+    winning_claim_id?: string;
+    note: string;
+    resolved_by: string;
+    resolved_at: string;
+  };
   created_at: string;
 }
 
 export interface KnowledgeSnapshot {
   snapshot_id: string;
+  query_sha256: string;
+  as_of: string;
   claim_ids: string[];
   evidence_ids: string[];
+  contradiction_ids?: string[];
   ontology_pack: string;
   ontology_version: string;
   checksum: string;
+  run_manifest_id?: string;
+  bound_at?: string;
   created_at: string;
 }
 
@@ -739,9 +758,13 @@ export interface KnowledgeRetrievalHit {
   claim: KnowledgeClaim;
   evidence: KnowledgeEvidence[];
   score: number;
+  evidence_score: number;
   expired: boolean;
+  stale_evidence: boolean;
   has_conflict: boolean;
+  determination: 'FACT' | 'CONFLICTED' | 'EXPIRED' | 'STALE_EVIDENCE' | 'RETRACTED';
   matched_by: string[];
+  relation_path?: string[];
 }
 
 export interface KnowledgeRetrievalResponse {

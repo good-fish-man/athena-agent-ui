@@ -36,6 +36,8 @@ export function EvidenceKnowledgePanel() {
   const [result, setResult] = React.useState<KnowledgeRetrievalResponse | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [retrieving, setRetrieving] = React.useState(false);
+  const [resolving, setResolving] = React.useState('');
+  const [resolutionNotes, setResolutionNotes] = React.useState<Record<string, string>>({});
   const [error, setError] = React.useState('');
 
   const load = React.useCallback(async () => {
@@ -82,6 +84,28 @@ export function EvidenceKnowledgePanel() {
       setError(t('evidenceKnowledge.retrieveFailed'));
     } finally {
       setRetrieving(false);
+    }
+  };
+
+  const resolveConflict = async (item: KnowledgeContradiction, decision: 'KEEP_CLAIM' | 'MARK_UNCERTAIN' | 'RETRACT_ALL', winningClaimId?: string) => {
+    const note = (resolutionNotes[item.contradiction_id] || '').trim();
+    if (!note || resolving) return;
+    setResolving(item.contradiction_id);
+    setError('');
+    try {
+      await evidenceKnowledgeApi.resolveContradiction(item.contradiction_id, { decision, winning_claim_id: winningClaimId, note });
+      setContradictions(current => current.filter(conflict => conflict.contradiction_id !== item.contradiction_id));
+      setResolutionNotes(current => {
+        const next = { ...current };
+        delete next[item.contradiction_id];
+        return next;
+      });
+      setClaims(await evidenceKnowledgeApi.claims());
+    } catch (resolveError) {
+      console.error('Failed to resolve knowledge contradiction:', resolveError);
+      setError(t('evidenceKnowledge.resolveFailed'));
+    } finally {
+      setResolving('');
     }
   };
 
@@ -165,9 +189,8 @@ export function EvidenceKnowledgePanel() {
                         <p className="mt-1 font-semibold text-slate-900">{hit.claim.value}</p>
                       </div>
                       <div className="flex gap-2 text-xs font-bold">
-                        {hit.expired && <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-600">{t('evidenceKnowledge.expired')}</span>}
-                        {hit.has_conflict && <span className="rounded-full bg-amber-100 px-2.5 py-1 text-amber-700">{t('evidenceKnowledge.conflicted')}</span>}
-                        {!hit.expired && !hit.has_conflict && <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-emerald-700">{t('evidenceKnowledge.active')}</span>}
+                        <span className={`rounded-full px-2.5 py-1 ${hit.determination === 'FACT' ? 'bg-emerald-100 text-emerald-700' : hit.determination === 'CONFLICTED' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}`}>{hit.determination}</span>
+                        {hit.stale_evidence && <span className="rounded-full bg-orange-100 px-2.5 py-1 text-orange-700">{t('evidenceKnowledge.staleEvidence')}</span>}
                         <span className="rounded-full bg-sky-100 px-2.5 py-1 text-sky-700">{percent(hit.score)}</span>
                       </div>
                     </div>
@@ -184,9 +207,10 @@ export function EvidenceKnowledgePanel() {
                                 <Globe2 size={15} /> {item.title || t('evidenceKnowledge.source')} <ExternalLink size={13} />
                               </a>
                             ) : <span className="font-semibold text-slate-700">{item.title}</span>}
-                            <span className="text-xs text-slate-500">{t('evidenceKnowledge.authority')} {percent(item.authority)} · {t('evidenceKnowledge.freshness')} {percent(item.freshness)}</span>
+                            <span className="text-xs text-slate-500">{item.trust_profile} · {t('evidenceKnowledge.authority')} {percent(item.authority)} · {t('evidenceKnowledge.freshness')} {percent(item.freshness)}</span>
                           </div>
                           {item.excerpt && <p className="mt-1 line-clamp-2 text-slate-600">{item.excerpt}</p>}
+                          {item.stale_at && <p className="mt-1 text-xs text-slate-400">{t('evidenceKnowledge.staleAt')}: {shortDate(item.stale_at)}</p>}
                         </div>
                       ))}
                     </div>
@@ -245,13 +269,42 @@ export function EvidenceKnowledgePanel() {
           <div className="rounded-xl border border-slate-200 p-4">
             <div className="mb-3 flex items-center gap-2"><AlertTriangle size={17} className="text-amber-600" /><h3 className="font-bold text-slate-900">{t('evidenceKnowledge.conflicts')}</h3></div>
             {contradictions.length === 0 ? <p className="text-sm text-slate-500">{t('evidenceKnowledge.noConflicts')}</p> : contradictions.slice(0, 5).map(item => (
-              <div key={item.contradiction_id} className="mb-2 rounded-lg border border-amber-100 bg-amber-50 p-3 last:mb-0">
+              <div key={item.contradiction_id} className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3 last:mb-0">
                 <p className="text-sm font-semibold text-amber-900">{item.summary}</p>
                 <p className="mt-1 flex items-center gap-1 text-xs text-amber-700"><Clock3 size={12} />{shortDate(item.created_at)}</p>
+                <div className="mt-3 space-y-2">
+                  {item.claim_ids.map(claimId => {
+                    const claim = claims.find(value => value.claim_id === claimId);
+                    return (
+                      <button key={claimId} type="button" disabled={!resolutionNotes[item.contradiction_id]?.trim() || resolving === item.contradiction_id} onClick={() => void resolveConflict(item, 'KEEP_CLAIM', claimId)} className="block w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-left text-xs font-semibold text-slate-700 transition hover:border-emerald-400 hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-50">
+                        {t('evidenceKnowledge.keepClaim')}: {claim?.value || claimId}
+                      </button>
+                    );
+                  })}
+                  <textarea value={resolutionNotes[item.contradiction_id] || ''} onChange={event => setResolutionNotes(current => ({ ...current, [item.contradiction_id]: event.target.value }))} placeholder={t('evidenceKnowledge.resolutionNote')} rows={2} className="w-full resize-none rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs text-slate-700 outline-none focus:border-amber-400" />
+                  <div className="grid grid-cols-2 gap-2">
+                    <button type="button" disabled={!resolutionNotes[item.contradiction_id]?.trim() || resolving === item.contradiction_id} onClick={() => void resolveConflict(item, 'MARK_UNCERTAIN')} className="rounded-lg border border-amber-300 bg-white px-2 py-2 text-xs font-bold text-amber-800 disabled:opacity-50">{t('evidenceKnowledge.markUncertain')}</button>
+                    <button type="button" disabled={!resolutionNotes[item.contradiction_id]?.trim() || resolving === item.contradiction_id} onClick={() => void resolveConflict(item, 'RETRACT_ALL')} className="rounded-lg border border-red-200 bg-white px-2 py-2 text-xs font-bold text-red-700 disabled:opacity-50">{t('evidenceKnowledge.retractAll')}</button>
+                  </div>
+                </div>
               </div>
             ))}
           </div>
         </div>
+
+        {snapshots.length > 0 && (
+          <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+            <div className="mb-3 flex items-center gap-2"><ShieldCheck size={17} className="text-emerald-600" /><h3 className="font-bold text-slate-900">{t('evidenceKnowledge.recentSnapshots')}</h3></div>
+            <div className="grid gap-2 lg:grid-cols-2">
+              {snapshots.slice(0, 4).map(snapshot => (
+                <div key={snapshot.snapshot_id} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+                  <div className="flex items-center justify-between gap-3"><span className="font-mono text-slate-800">{snapshot.checksum.slice(0, 12)}</span><span>{shortDate(snapshot.as_of || snapshot.created_at)}</span></div>
+                  <p className="mt-1 truncate">{t('evidenceKnowledge.runManifest')}: {snapshot.run_manifest_id || t('evidenceKnowledge.unbound')}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </section>
   );

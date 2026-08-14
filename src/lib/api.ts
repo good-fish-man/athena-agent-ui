@@ -313,6 +313,13 @@ export const evidenceKnowledgeApi = {
     const value = await readJson<{ items: KnowledgeContradiction[] }>(await apiFetch(`${API_BASE}/knowledge/contradictions?unresolved=true&limit=${limit}`));
     return value.items || [];
   },
+  async resolveContradiction(id: string, request: { decision: 'KEEP_CLAIM' | 'MARK_UNCERTAIN' | 'RETRACT_ALL'; winning_claim_id?: string; note: string }): Promise<KnowledgeContradiction> {
+    return readJson<KnowledgeContradiction>(await apiFetch(`${API_BASE}/knowledge/contradictions/${encodeURIComponent(id)}/resolve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    }));
+  },
   async snapshots(limit = 20): Promise<KnowledgeSnapshot[]> {
     const value = await readJson<{ items: KnowledgeSnapshot[] }>(await apiFetch(`${API_BASE}/knowledge/snapshots?limit=${limit}`));
     return value.items || [];
@@ -323,10 +330,12 @@ export const evidenceKnowledgeApi = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         text,
-        scopes: ['USER'],
+        scopes: ['USER', 'PUBLIC'],
         max_sensitivity: 'INTERNAL',
         as_of: new Date().toISOString(),
         include_expired: false,
+        relation_depth: 1,
+        min_evidence_authority: 0.25,
         budget: { max_results: 20, max_tokens: 12000, max_time_ms: 3000 },
       }),
     }));
