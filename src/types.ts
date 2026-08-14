@@ -411,6 +411,100 @@ export interface DeploymentRollback {
   created_at: string;
 }
 
+export interface KnowledgeProvenance {
+  producer: string;
+  method: string;
+  trace_id?: string;
+  source_task_id?: string;
+  captured_at: string;
+  content_sha256: string;
+}
+
+export interface KnowledgeEvidence {
+  schema: 'athena.knowledge.v1';
+  evidence_id: string;
+  owner_id: string;
+  scope: 'USER' | 'ORGANIZATION' | 'PUBLIC';
+  sensitivity: 'PUBLIC' | 'INTERNAL' | 'SENSITIVE' | 'RESTRICTED';
+  source_type: 'OFFICIAL' | 'RESEARCH' | 'PAGE_OBSERVATION' | 'USER_CONFIRMATION';
+  title: string;
+  uri?: string;
+  accessible: boolean;
+  excerpt: string;
+  authority: number;
+  freshness: number;
+  published_at?: string;
+  observed_at: string;
+  provenance: KnowledgeProvenance;
+}
+
+export interface KnowledgeClaim {
+  schema: 'athena.knowledge.v1';
+  claim_id: string;
+  owner_id: string;
+  subject: string;
+  predicate: string;
+  value: string;
+  scope: 'USER' | 'ORGANIZATION' | 'PUBLIC';
+  sensitivity: 'PUBLIC' | 'INTERNAL' | 'SENSITIVE' | 'RESTRICTED';
+  evidence_refs: string[];
+  confidence: number;
+  time_sensitive: boolean;
+  valid_from?: string;
+  valid_until?: string;
+  contradicted_by?: string[];
+  status: 'ACTIVE' | 'EXPIRED' | 'CONTRADICTED' | 'RETRACTED';
+  provenance: KnowledgeProvenance;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface KnowledgeContradiction {
+  contradiction_id: string;
+  claim_ids: string[];
+  evidence_refs: string[];
+  severity: string;
+  summary: string;
+  resolved: boolean;
+  resolution?: string;
+  created_at: string;
+}
+
+export interface KnowledgeSnapshot {
+  snapshot_id: string;
+  claim_ids: string[];
+  evidence_ids: string[];
+  ontology_pack: string;
+  ontology_version: string;
+  checksum: string;
+  created_at: string;
+}
+
+export interface KnowledgeRetrievalHit {
+  claim: KnowledgeClaim;
+  evidence: KnowledgeEvidence[];
+  score: number;
+  expired: boolean;
+  has_conflict: boolean;
+  matched_by: string[];
+}
+
+export interface KnowledgeRetrievalResponse {
+  hits: KnowledgeRetrievalHit[];
+  contradictions: KnowledgeContradiction[];
+  snapshot?: KnowledgeSnapshot;
+  budget: { results: number; tokens: number; time_ms: number };
+}
+
+export interface OntologyPack {
+  pack_id: string;
+  name: string;
+  domain: string;
+  current_version?: string;
+  display?: Record<string, string>;
+  created_at: string;
+}
+
 export interface Agent {
   ulid?: string;
   id: string;

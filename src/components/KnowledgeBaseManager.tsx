@@ -19,6 +19,7 @@ import { cn } from '../lib/utils';
 import { useTranslation } from 'react-i18next';
 import { KnowledgeBase, RecallTestRecord } from '../types';
 import { knowledgeBaseApi, RecallResult } from '../lib/api';
+import { EvidenceKnowledgePanel } from './EvidenceKnowledgePanel';
 
 interface KnowledgeBaseManagerProps {
   pendingConfig?: Record<string, any> | null;
@@ -214,6 +215,14 @@ export function KnowledgeBaseManager({ pendingConfig, onConfigConsumed }: Knowle
             {t('knowledge.connect')}
           </button>
         </div>
+      </div>
+
+      <EvidenceKnowledgePanel />
+
+      <div className="mb-4 flex items-center gap-3">
+        <div className="h-px flex-1 bg-slate-200" />
+        <span className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">{t('evidenceKnowledge.externalSources')}</span>
+        <div className="h-px flex-1 bg-slate-200" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">

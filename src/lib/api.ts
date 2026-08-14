@@ -25,6 +25,12 @@ import type {
   LearningCandidate,
   LearningCandidateEvidence,
   LearningCandidateEvaluation,
+  KnowledgeClaim,
+  KnowledgeContradiction,
+  KnowledgeEvidence,
+  KnowledgeRetrievalResponse,
+  KnowledgeSnapshot,
+  OntologyPack,
 } from '../types';
 import {
   ATHENA_PROTOCOL,
@@ -280,6 +286,43 @@ export const learningApi = {
   },
   async discardDemonstration(id: string): Promise<Demonstration> {
     return readJson(await apiFetch(`${API_BASE}/learning/demonstrations/${encodeURIComponent(id)}/discard`, { method: 'POST' }));
+  },
+};
+
+export const evidenceKnowledgeApi = {
+  async claims(limit = 100): Promise<KnowledgeClaim[]> {
+    const value = await readJson<{ items: KnowledgeClaim[] }>(await apiFetch(`${API_BASE}/knowledge/claims?limit=${limit}`));
+    return value.items || [];
+  },
+  async evidence(limit = 100): Promise<KnowledgeEvidence[]> {
+    const value = await readJson<{ items: KnowledgeEvidence[] }>(await apiFetch(`${API_BASE}/knowledge/evidence?limit=${limit}`));
+    return value.items || [];
+  },
+  async contradictions(limit = 100): Promise<KnowledgeContradiction[]> {
+    const value = await readJson<{ items: KnowledgeContradiction[] }>(await apiFetch(`${API_BASE}/knowledge/contradictions?unresolved=true&limit=${limit}`));
+    return value.items || [];
+  },
+  async snapshots(limit = 20): Promise<KnowledgeSnapshot[]> {
+    const value = await readJson<{ items: KnowledgeSnapshot[] }>(await apiFetch(`${API_BASE}/knowledge/snapshots?limit=${limit}`));
+    return value.items || [];
+  },
+  async retrieve(text: string): Promise<KnowledgeRetrievalResponse> {
+    return readJson<KnowledgeRetrievalResponse>(await apiFetch(`${API_BASE}/knowledge/retrieve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text,
+        scopes: ['USER'],
+        max_sensitivity: 'INTERNAL',
+        as_of: new Date().toISOString(),
+        include_expired: false,
+        budget: { max_results: 20, max_tokens: 12000, max_time_ms: 3000 },
+      }),
+    }));
+  },
+  async ontologyPacks(): Promise<OntologyPack[]> {
+    const value = await readJson<{ items: OntologyPack[] }>(await apiFetch(`${API_BASE}/knowledge/ontology/packs`));
+    return value.items || [];
   },
 };
 
