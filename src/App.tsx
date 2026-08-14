@@ -18,6 +18,7 @@ import { Inbox } from './components/Inbox';
 import { CommandCenter } from './components/CommandCenter';
 import { ProjectWorkspace } from './components/ProjectWorkspace';
 import { WebsiteAccounts } from './components/WebsiteAccounts';
+import { ExperienceLab } from './components/ExperienceLab';
 import { View, Agent } from './types';
 import { AnimatePresence, motion } from 'motion/react';
 import { Toaster } from 'sonner';
@@ -121,6 +122,8 @@ export default function App() {
         return <Settings />;
       case 'inbox':
         return <Inbox onViewChange={setActiveView} />;
+      case 'experience':
+        return <ExperienceLab />;
       default:
         return <Dashboard onViewChange={setActiveView} />;
     }

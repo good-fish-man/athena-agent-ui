@@ -15,6 +15,7 @@ Athena Agent UI is the browser interface for the Athena agent platform. It conne
 - Dashboard for agents, task/token activity, conversations, and approvals.
 - Agent builder with LLM, embedding, image model, skill, tool, knowledge, memory, sandbox, and sub-agent settings.
 - Agent-scoped chat history with streaming text, tool events, generated media, approvals, and voice input/output.
+- Experience workspace for sanitized task history, retention controls, failure inspection, and deterministic offline regression suites.
 - Model key vault, cloud/local model creation, local downloads, lifecycle controls, fine-tuning, and distillation.
 - Website Accounts with encrypted agent-browser Auth Vault storage and domain-aware assisted sign-in cards in chat.
 - Inbox management for chat-created ticket, stock, and appointment monitors with pause/resume and interactive result review.
@@ -129,6 +130,10 @@ If an agent has no model binding, the client attempts to use the current user's 
 4. Generate a patch, inspect additions/deletions per file, validate it, then apply it.
 
 Workspace operations execute on the machine running `agent-runtime-client`. Do not expose local-directory APIs to untrusted networks.
+
+### Experience and Evaluation
+
+Open **Experience** to review sanitized historical task outcomes, search by status/outcome/sensitivity, adjust per-user learning and retention preferences, or permanently delete an experience payload. Selected experiences can be frozen as fixtures and replayed in deterministic offline suites. Historical experience is always displayed as untrusted, read-only evidence and never overrides current observations.
 
 ### Appearance and Language
 

@@ -50,6 +50,13 @@
   background-color: var(--theme-surface) !important;
 }
 
+.theme-canvas > .experience-hero {
+  background:
+    radial-gradient(circle at 18% 20%, rgba(16, 185, 129, 0.22), transparent 32%),
+    radial-gradient(circle at 88% 10%, rgba(14, 165, 233, 0.18), transparent 30%),
+    #020617 !important;
+}
+
 .theme-surface {
   background-color: var(--theme-surface) !important;
 }

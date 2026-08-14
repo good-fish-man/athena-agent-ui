@@ -1,7 +1,175 @@
 import type { ModelRuntimeMode } from './lib/runtimeConstants';
 import type { Observation as ProtocolObservation } from './generated/athena-protocol-v4';
 
-export type View = 'dashboard' | 'orchestrator' | 'agents' | 'skills' | 'knowledge' | 'models' | 'media' | 'chat' | 'workspace' | 'website-accounts' | 'settings' | 'inbox';
+export type View = 'dashboard' | 'orchestrator' | 'agents' | 'skills' | 'knowledge' | 'models' | 'media' | 'chat' | 'workspace' | 'website-accounts' | 'settings' | 'inbox' | 'experience';
+
+export type ExperienceStatus = 'READY' | 'SKIPPED' | 'DELETED';
+export type ExperienceOutcome = 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
+export type ExperienceSensitivity = 'INTERNAL' | 'SENSITIVE' | 'RESTRICTED';
+
+export interface ExperienceFailure {
+  class: string;
+  rule: string;
+  summary: string;
+  evidence_ids?: string[];
+  confidence: number;
+}
+
+export interface ExperienceModelUsage {
+  model_id?: string;
+  model?: string;
+  calls: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  cost_micros?: number;
+}
+
+export interface ExperienceCapabilityUsage {
+  capability: string;
+  operation?: string;
+  calls: number;
+  succeeded: number;
+  failed: number;
+  duration_ms: number;
+}
+
+export interface ExperienceRecord {
+  schema: 'athena.experience.v1' | string;
+  experience_id: string;
+  owner_id: string;
+  task_id: string;
+  status: ExperienceStatus;
+  skip_reason?: string;
+  goal_summary?: string;
+  intent?: Record<string, unknown>;
+  environment_fingerprint?: string;
+  plan_summary?: string;
+  decision_summary?: string;
+  action_refs?: Array<{
+    action_id: string;
+    step_id?: string;
+    capability: string;
+    operation?: string;
+    risk?: string;
+    outcome?: string;
+  }>;
+  observation_refs?: Array<{
+    observation_id: string;
+    action_id: string;
+    status: string;
+    summary?: string;
+    evidence_ids?: string[];
+  }>;
+  outcome?: ExperienceOutcome;
+  verification: { passed: boolean; summary?: string; evidence_ids?: string[] };
+  failure_classification?: ExperienceFailure;
+  cost: {
+    models?: ExperienceModelUsage[];
+    capabilities?: ExperienceCapabilityUsage[];
+    total_tokens: number;
+    total_micros?: number;
+  };
+  duration_ms: number;
+  human_intervention: { required: boolean; approval_count: number; rejected_count: number };
+  sensitivity: ExperienceSensitivity;
+  retention_policy: { days: number; payload_mode: string; delete_at?: string };
+  provenance: {
+    trace_id?: string;
+    protocol: string;
+    event_ids?: string[];
+    generated_by: string;
+    generated_at: string;
+  };
+  created_at: string;
+  updated_at: string;
+  deleted_at?: string;
+}
+
+export interface ExperiencePreference {
+  owner_id: string;
+  learning_enabled: boolean;
+  retention_days: number;
+  max_sensitivity: ExperienceSensitivity;
+  updated_at: string;
+}
+
+export interface ExperienceStats {
+  total: number;
+  ready: number;
+  skipped: number;
+  deleted: number;
+  redactions: number;
+  evaluation_runs: number;
+  evaluation_pass_rate: number;
+  failure_classes: Record<string, number>;
+}
+
+export interface ExperienceSearchHit {
+  experience: ExperienceRecord;
+  score: number;
+  keyword_score: number;
+  similarity_score: number;
+  historical_only: true;
+}
+
+export interface EvaluationMetrics {
+  correctness: number;
+  success_rate: number;
+  safety_score: number;
+  latency_ms: number;
+  cost_micros: number;
+}
+
+export interface EvaluationFixture {
+  schema: string;
+  fixture_id: string;
+  owner_id: string;
+  experience_id: string;
+  name: string;
+  runtime_kind: string;
+  simulator: string;
+  environment_version: string;
+  snapshot_hash: string;
+  protocol: string;
+  input: Record<string, unknown>;
+  expected: { task_status?: string; observation_status?: string; predicates?: Record<string, unknown> };
+  sensitivity: ExperienceSensitivity;
+  created_at: string;
+}
+
+export interface EvaluationSuite {
+  suite_id: string;
+  owner_id: string;
+  name: string;
+  fixture_ids: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EvaluationRun {
+  run_id: string;
+  owner_id: string;
+  suite_id: string;
+  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED';
+  seed: number;
+  candidate_id?: string;
+  baseline_id?: string;
+  metrics: EvaluationMetrics;
+  started_at: string;
+  finished_at?: string;
+  error?: string;
+}
+
+export interface EvaluationResult {
+  result_id: string;
+  run_id: string;
+  fixture_id: string;
+  passed: boolean;
+  metrics: EvaluationMetrics;
+  summary: string;
+  evidence_ids?: string[];
+  created_at: string;
+}
 
 export interface Agent {
   ulid?: string;

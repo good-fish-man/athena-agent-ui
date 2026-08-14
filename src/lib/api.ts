@@ -1,4 +1,19 @@
-import type { Agent, BrowserSuggestedAction, ControlObservation } from '../types';
+import type {
+  Agent,
+  BrowserSuggestedAction,
+  ControlObservation,
+  EvaluationFixture,
+  EvaluationResult,
+  EvaluationRun,
+  EvaluationSuite,
+  ExperienceOutcome,
+  ExperiencePreference,
+  ExperienceRecord,
+  ExperienceSearchHit,
+  ExperienceSensitivity,
+  ExperienceStats,
+  ExperienceStatus,
+} from '../types';
 import {
   ATHENA_PROTOCOL,
   type Action as ProtocolAction,
@@ -81,6 +96,117 @@ export type RuntimeCapabilityConfig = {
 export const capabilityApi = {
   async list(): Promise<RuntimeCapability[]> {
     return readJson<RuntimeCapability[]>(await apiFetch(`${RUNTIME_API_BASE}/capabilities`));
+  },
+};
+
+export interface ExperienceListRequest {
+  status?: ExperienceStatus | '';
+  outcome?: ExperienceOutcome | '';
+  failureClass?: string;
+  sensitivity?: ExperienceSensitivity | '';
+  query?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface ExperienceSearchRequest {
+  query?: string;
+  task_type?: string;
+  domain?: string;
+  environment_fingerprint?: string;
+  failure_class?: string;
+  capability?: string;
+  outcome?: ExperienceOutcome | '';
+  budget?: {
+    max_results?: number;
+    max_tokens?: number;
+    max_duration_ms?: number;
+    max_sensitivity?: ExperienceSensitivity;
+  };
+}
+
+export const experienceApi = {
+  async preference(): Promise<ExperiencePreference> {
+    return readJson<ExperiencePreference>(await apiFetch(`${API_BASE}/experience/preferences`));
+  },
+  async savePreference(value: Pick<ExperiencePreference, 'learning_enabled' | 'retention_days' | 'max_sensitivity'>): Promise<ExperiencePreference> {
+    return readJson<ExperiencePreference>(await apiFetch(`${API_BASE}/experience/preferences`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(value),
+    }));
+  },
+  async list(request: ExperienceListRequest = {}): Promise<{ items: ExperienceRecord[]; total: number; limit: number; offset: number }> {
+    const query = new URLSearchParams();
+    if (request.status) query.set('status', request.status);
+    if (request.outcome) query.set('outcome', request.outcome);
+    if (request.failureClass) query.set('failure_class', request.failureClass);
+    if (request.sensitivity) query.set('sensitivity', request.sensitivity);
+    if (request.query) query.set('query', request.query);
+    query.set('limit', String(request.limit || 50));
+    query.set('offset', String(request.offset || 0));
+    return readJson(await apiFetch(`${API_BASE}/experience?${query}`));
+  },
+  async find(id: string): Promise<ExperienceRecord> {
+    return readJson<ExperienceRecord>(await apiFetch(`${API_BASE}/experience/${encodeURIComponent(id)}`));
+  },
+  async delete(id: string): Promise<void> {
+    await readJson(await apiFetch(`${API_BASE}/experience/${encodeURIComponent(id)}`, { method: 'DELETE' }));
+  },
+  async search(request: ExperienceSearchRequest): Promise<{ items: ExperienceSearchHit[]; historical_only: true }> {
+    return readJson(await apiFetch(`${API_BASE}/experience/search`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...request,
+        budget: {
+          max_results: request.budget?.max_results || 8,
+          max_tokens: request.budget?.max_tokens || 4000,
+          max_duration_ms: request.budget?.max_duration_ms || 500,
+          max_sensitivity: request.budget?.max_sensitivity || 'SENSITIVE',
+        },
+      }),
+    }));
+  },
+  async stats(scope: 'mine' | 'all' = 'mine'): Promise<ExperienceStats> {
+    return readJson<ExperienceStats>(await apiFetch(`${API_BASE}/experience/stats${scope === 'all' ? '?scope=all' : ''}`));
+  },
+  async createFixture(experienceId: string, request: { name: string; environment_version: string }): Promise<EvaluationFixture> {
+    return readJson<EvaluationFixture>(await apiFetch(`${API_BASE}/experience/${encodeURIComponent(experienceId)}/fixture`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    }));
+  },
+  async fixtures(limit = 50): Promise<EvaluationFixture[]> {
+    const result = await readJson<{ items: EvaluationFixture[] }>(await apiFetch(`${API_BASE}/evaluation/fixtures?limit=${limit}`));
+    return result.items || [];
+  },
+  async createSuite(request: { name: string; fixture_ids: string[] }): Promise<EvaluationSuite> {
+    return readJson<EvaluationSuite>(await apiFetch(`${API_BASE}/evaluation/suites`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    }));
+  },
+  async suites(limit = 50): Promise<EvaluationSuite[]> {
+    const result = await readJson<{ items: EvaluationSuite[] }>(await apiFetch(`${API_BASE}/evaluation/suites?limit=${limit}`));
+    return result.items || [];
+  },
+  async runSuite(suiteId: string, request: { seed: number; candidate_id?: string; baseline_id?: string }): Promise<{ run: EvaluationRun; results: EvaluationResult[] }> {
+    return readJson(await apiFetch(`${API_BASE}/evaluation/suites/${encodeURIComponent(suiteId)}/runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    }));
+  },
+  async runs(limit = 50): Promise<EvaluationRun[]> {
+    const result = await readJson<{ items: EvaluationRun[] }>(await apiFetch(`${API_BASE}/evaluation/runs?limit=${limit}`));
+    return result.items || [];
+  },
+  async results(runId: string): Promise<EvaluationResult[]> {
+    const result = await readJson<{ items: EvaluationResult[] }>(await apiFetch(`${API_BASE}/evaluation/runs/${encodeURIComponent(runId)}/results`));
+    return result.items || [];
   },
 };
 
