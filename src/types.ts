@@ -505,6 +505,104 @@ export interface OntologyPack {
   created_at: string;
 }
 
+export type GoalStatus = 'DRAFT' | 'PLANNED' | 'RUNNING' | 'WAITING_USER' | 'PAUSED' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
+export type GoalTaskStatus = 'PENDING' | 'READY' | 'RUNNING' | 'WAITING_USER' | 'WAITING_DEVICE' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
+
+export interface GoalBudget {
+  max_concurrent_specialists: number;
+  max_depth: number;
+  max_tokens: number;
+  max_duration_ms: number;
+  max_search_queries: number;
+  max_pages: number;
+  max_actions: number;
+}
+
+export interface GoalUsage {
+  tokens: number;
+  duration_ms: number;
+  search_queries: number;
+  pages: number;
+  actions: number;
+}
+
+export interface GoalCriterion {
+  criterion_id: string;
+  description: string;
+  required: boolean;
+  verified: boolean;
+  evidence_ref?: string;
+}
+
+export interface PersistentGoal {
+  schema: 'athena.orchestration.v1';
+  goal_id: string;
+  owner_id: string;
+  agent_id: string;
+  conversation_id?: string;
+  objective: string;
+  constraints: string[];
+  success_criteria: GoalCriterion[];
+  budget: GoalBudget;
+  usage: GoalUsage;
+  deadline?: string;
+  active_task_ids?: string[];
+  latest_checkpoint_id?: string;
+  status: GoalStatus;
+  revision: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GoalTask {
+  task_id: string;
+  goal_id: string;
+  specialist: 'RESEARCH' | 'BROWSER' | 'DESKTOP' | 'FILE' | 'SYNTHESIS';
+  objective: string;
+  depends_on?: string[];
+  required_capabilities?: string[];
+  device_id?: string;
+  budget: Omit<GoalBudget, 'max_concurrent_specialists' | 'max_depth'>;
+  status: GoalTaskStatus;
+  attempt: number;
+  depth: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GoalCheckpoint {
+  checkpoint_id: string;
+  goal_id: string;
+  sequence: number;
+  goal_revision: number;
+  status: GoalStatus;
+  usage: GoalUsage;
+  confirmed_effect_keys?: string[];
+  pending_approval_ids?: string[];
+  reason: string;
+  checksum: string;
+  created_at: string;
+}
+
+export interface SpecialistResult {
+  run_id: string;
+  task_id: string;
+  specialist: GoalTask['specialist'];
+  status: GoalTaskStatus;
+  summary: string;
+  evidence_refs?: string[];
+  usage: GoalUsage;
+  provenance: { run_manifest_id: string; agent_build_id: string; model_config_version: string; device_id?: string; trace_id: string; produced_at: string };
+  created_at: string;
+}
+
+export interface GoalState {
+  goal: PersistentGoal;
+  tasks: GoalTask[];
+  results: SpecialistResult[];
+  checkpoint?: GoalCheckpoint;
+}
+
 export interface Agent {
   ulid?: string;
   id: string;

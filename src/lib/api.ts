@@ -31,6 +31,9 @@ import type {
   KnowledgeRetrievalResponse,
   KnowledgeSnapshot,
   OntologyPack,
+	PersistentGoal,
+	GoalState,
+	GoalCheckpoint,
 } from '../types';
 import {
   ATHENA_PROTOCOL,
@@ -322,6 +325,50 @@ export const evidenceKnowledgeApi = {
   },
   async ontologyPacks(): Promise<OntologyPack[]> {
     const value = await readJson<{ items: OntologyPack[] }>(await apiFetch(`${API_BASE}/knowledge/ontology/packs`));
+    return value.items || [];
+  },
+};
+
+export const goalApi = {
+  async list(limit = 100): Promise<PersistentGoal[]> {
+    const value = await readJson<{ items: PersistentGoal[] }>(await apiFetch(`${API_BASE}/goals?limit=${limit}`));
+    return value.items || [];
+  },
+  async find(id: string): Promise<GoalState> {
+    return readJson<GoalState>(await apiFetch(`${API_BASE}/goals/${encodeURIComponent(id)}`));
+  },
+  async createResearch(request: { agent_id: string; objective: string; success: string; deadline?: string }): Promise<GoalState> {
+    const goal = await readJson<PersistentGoal>(await apiFetch(`${API_BASE}/goals`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+        agent_id: request.agent_id,
+        objective: request.objective,
+        constraints: ['Use registered capabilities only', 'Do not execute generated code', 'Stop when the bounded budget is exhausted'],
+        success_criteria: [{ description: request.success, required: true }],
+        deadline: request.deadline || undefined,
+      }),
+    }));
+    return readJson<GoalState>(await apiFetch(`${API_BASE}/goals/${encodeURIComponent(goal.goal_id)}/plan`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+        expected_revision: goal.revision,
+        tasks: [
+          { task_id: 'research', depth: 1, specialist: 'RESEARCH', objective: request.objective, required_capabilities: ['internet.search', 'internet.fetch'] },
+          { task_id: 'synthesis', depth: 2, specialist: 'SYNTHESIS', objective: `Synthesize a verified answer for: ${request.objective}`, depends_on: ['research'] },
+        ],
+      }),
+    }));
+  },
+  async pause(goal: PersistentGoal): Promise<GoalState> {
+    return readJson<GoalState>(await apiFetch(`${API_BASE}/goals/${encodeURIComponent(goal.goal_id)}/pause`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expected_revision: goal.revision, reason: 'paused by user' }),
+    }));
+  },
+  async resume(goal: PersistentGoal): Promise<{ goal: PersistentGoal }> {
+    return readJson(await apiFetch(`${API_BASE}/goals/${encodeURIComponent(goal.goal_id)}/resume`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expected_revision: goal.revision }),
+    }));
+  },
+  async checkpoints(goalId: string): Promise<GoalCheckpoint[]> {
+    const value = await readJson<{ items: GoalCheckpoint[] }>(await apiFetch(`${API_BASE}/goals/${encodeURIComponent(goalId)}/checkpoints?limit=20`));
     return value.items || [];
   },
 };

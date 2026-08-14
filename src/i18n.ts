@@ -958,6 +958,12 @@ const resources = {
           stage: { queued: 'Queued', preparing: 'Preparing', dependencies: 'Installing dependencies', distilling: 'Generating distilled samples', training: 'LoRA training', importing: 'Importing into Ollama', complete: 'Complete', failed: 'Failed', canceled: 'Canceled', interrupted: 'Interrupted' }
         }
       },
+      goals: {
+        title: 'Long-running goals', subtitle: 'Durable, budgeted specialist plans that continue across restarts and devices.', new: 'New research goal', loading: 'Loading durable goals...', empty: 'No long-running goals yet', emptyHint: 'Create a bounded research goal here, or ask an Agent in chat to plan a more complex goal.', loadFailed: 'Failed to load long-running goals',
+        createTitle: 'Create a bounded research goal', createHint: 'Athena creates a finite Research → Synthesis graph. Browser and desktop work should be planned with an Agent in chat.', agent: 'Agent', objective: 'Objective', objectivePlaceholder: 'Research next month\'s Hokkaido travel conditions and options', success: 'Observable success criterion', successPlaceholder: 'Official weather, transport, and lodging sources are cited', deadline: 'Deadline (optional)', create: 'Create durable goal', creating: 'Creating...', created: 'Long-running goal created', createFailed: 'Failed to create goal', paused: 'Goal paused at a durable checkpoint', resumed: 'Goal resumed from its checkpoint', actionFailed: 'Goal transition failed', tasks: 'tasks', tokens: 'tokens', attempt: 'Attempt', checkpoints: 'Recent checkpoints',
+        status: { DRAFT: 'Draft', PLANNED: 'Planned', RUNNING: 'Running', WAITING_USER: 'Needs you', PAUSED: 'Paused', COMPLETED: 'Completed', FAILED: 'Failed', CANCELLED: 'Cancelled' },
+        taskStatus: { PENDING: 'Pending', READY: 'Ready', RUNNING: 'Running', WAITING_USER: 'Needs you', WAITING_DEVICE: 'Waiting for device', COMPLETED: 'Completed', FAILED: 'Failed', CANCELLED: 'Cancelled' }
+      },
       inbox: {
         title: 'Task Approvals (Inbox)',
         subtitle: 'Manage agent tasks requiring human-in-the-loop intervention',
@@ -1946,6 +1952,12 @@ const resources = {
           status: { queued: '排队中', running: '运行中', completed: '已完成', failed: '失败', canceled: '已取消' },
           stage: { queued: '等待执行', preparing: '准备环境', dependencies: '安装训练依赖', distilling: '生成蒸馏样本', training: 'LoRA 训练', importing: '导入 Ollama', complete: '已完成', failed: '失败', canceled: '已取消', interrupted: '已中断' }
         }
+      },
+      goals: {
+        title: '长期目标', subtitle: '可跨服务重启和设备恢复、具有明确预算与 Checkpoint 的有限专家计划。', new: '新建研究目标', loading: '正在加载长期目标…', empty: '还没有长期目标', emptyHint: '可在这里创建有边界的研究目标；更复杂的目标请在聊天中让 Agent 规划。', loadFailed: '加载长期目标失败',
+        createTitle: '创建有边界的研究目标', createHint: 'Athena 会创建有限的「研究 → 综合」任务图；浏览器或桌面任务建议在聊天中由 Agent 规划。', agent: 'Agent', objective: '目标', objectivePlaceholder: '研究下个月北海道旅行的天气、交通与住宿方案', success: '可观察的成功标准', successPlaceholder: '引用天气、交通和住宿的官方来源', deadline: '截止时间（可选）', create: '创建长期目标', creating: '正在创建…', created: '长期目标已创建', createFailed: '创建长期目标失败', paused: '目标已在耐久 Checkpoint 暂停', resumed: '目标已从 Checkpoint 恢复', actionFailed: '目标状态操作失败', tasks: '个任务', tokens: 'Token', attempt: '尝试次数', checkpoints: '最近 Checkpoint',
+        status: { DRAFT: '草稿', PLANNED: '已规划', RUNNING: '运行中', WAITING_USER: '等待你处理', PAUSED: '已暂停', COMPLETED: '已完成', FAILED: '失败', CANCELLED: '已取消' },
+        taskStatus: { PENDING: '等待依赖', READY: '就绪', RUNNING: '运行中', WAITING_USER: '等待你处理', WAITING_DEVICE: '等待设备', COMPLETED: '已完成', FAILED: '失败', CANCELLED: '已取消' }
       },
       inbox: {
         title: '任务审批 (Inbox)',

@@ -6,6 +6,7 @@ import { ChatApproval } from '../types';
 import { chatApi, scheduledTaskApi, type ScheduledTaskDTO } from '../lib/api';
 import { authStore } from '../lib/auth';
 import type { View } from '../types';
+import { GoalWorkspace } from './GoalWorkspace';
 
 export function Inbox({ onViewChange }: { onViewChange?: (view: View) => void }) {
 	const currentUserId = authStore.userID();
@@ -104,6 +105,7 @@ export function Inbox({ onViewChange }: { onViewChange?: (view: View) => void })
 
       <div className="flex-1 overflow-y-auto p-6 scrollbar-hide">
         <div className="max-w-4xl mx-auto space-y-4">
+          <GoalWorkspace />
 			{tasks.length > 0 && <section className="mb-8"><div className="mb-3 flex items-center justify-between"><div><h2 className="font-bold text-slate-900">{t('inbox.scheduledTasks')}</h2><p className="text-xs text-slate-500">{t('inbox.scheduledTasksHint')}</p></div><span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-500">{tasks.length}</span></div><div className="grid gap-3 md:grid-cols-2">{tasks.map(task => { const TaskIcon = taskIcon(task.task_type); return <article key={task.ulid} className="theme-card rounded-2xl border border-slate-200 p-4"><div className="flex items-start gap-3"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-600"><TaskIcon size={18}/></div><div className="min-w-0 flex-1"><p className="truncate text-sm font-bold text-slate-900">{task.name}</p><p className="mt-1 font-mono text-[10px] text-slate-400">{task.cron} · {task.timezone}</p></div><span className={cn('rounded-full px-2 py-1 text-[9px] font-bold uppercase', task.status === 'active' ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-500')}>{t(`inbox.taskStatus.${task.status}`)}</span></div><p className="mt-3 line-clamp-2 text-xs leading-5 text-slate-600">{task.prompt}</p>{task.last_error && <p className="mt-2 line-clamp-2 text-[10px] text-red-500">{task.last_error}</p>}<div className="mt-4 flex justify-end gap-2"><button onClick={() => void toggleTask(task)} className="rounded-lg border border-slate-200 p-2 text-slate-500 hover:bg-slate-50">{task.status === 'active' ? <Pause size={14}/> : <Play size={14}/>}</button><button onClick={() => void deleteTask(task)} className="rounded-lg border border-slate-200 p-2 text-slate-400 hover:border-red-200 hover:text-red-500"><Trash2 size={14}/></button></div></article>; })}</div></section>}
           {filteredApprovals.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 text-center">
