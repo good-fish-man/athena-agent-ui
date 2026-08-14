@@ -290,6 +290,61 @@ export interface Demonstration {
 export type DeploymentStatus = 'PROPOSED' | 'REVIEWED' | 'SHADOW' | 'CANARY' | 'ACTIVE' | 'PAUSED' | 'ROLLED_BACK' | 'RETIRED';
 export type DeploymentRisk = 'R0' | 'R1' | 'R2' | 'R3';
 
+export interface PluginPermissionSet {
+  network_domains?: string[];
+  filesystem_read?: string[];
+  filesystem_write?: string[];
+  credential_scopes?: string[];
+  device_capabilities?: string[];
+  world_read_scopes?: string[];
+  world_write_scopes?: string[];
+  external_effects: boolean;
+}
+
+export interface PluginProviderManifest {
+  schema: 'athena.plugin.v1';
+  provider_id: string;
+  name: string;
+  version: string;
+  description: string;
+  min_runtime_version: string;
+  capabilities: Array<{ id: string; description: string; read_only: boolean; risk: DeploymentRisk; observation_contract: string }>;
+  permissions: PluginPermissionSet;
+  risk_floor: DeploymentRisk;
+  resources: { max_execution_ms: number; max_input_bytes: number; max_output_bytes: number; max_concurrency: number; max_memory_mb: number; max_cpu_millis: number };
+}
+
+export interface PluginProvider {
+  provider_id: string;
+  version: string;
+  name: string;
+  description: string;
+  status: 'INSTALLED' | 'ACTIVE' | 'DISABLED' | 'REVOKED' | 'QUARANTINED';
+  visibility: 'private' | 'public';
+  manifest_sha256: string;
+  scan_status: 'PENDING' | 'PASSED' | 'FAILED';
+  review_status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  review_notes?: string;
+  approved_by?: string;
+  revoked_reason?: string;
+  revision: number;
+  installed_at: number;
+  updated_at: number;
+  manifest: PluginProviderManifest;
+}
+
+export interface PluginInvocationTrace {
+  invocation_id: string;
+  provider_id: string;
+  provider_version: string;
+  capability_id: string;
+  trace_id: string;
+  status: 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'DENIED';
+  error_code?: string;
+  started_at: string;
+  duration_ms: number;
+}
+
 export interface AgentBuild {
   schema: 'athena.deployment.v1';
   build_id: string;

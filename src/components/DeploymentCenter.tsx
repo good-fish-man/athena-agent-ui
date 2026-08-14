@@ -21,6 +21,7 @@ import { toast } from 'sonner';
 import { agentApi, deploymentApi } from '../lib/api';
 import { cn } from '../lib/utils';
 import type { Agent, AgentBuild, CanaryMetric, DeploymentExposure, DeploymentRollback, DeploymentStatus, Promotion, RunManifest, ShadowResult } from '../types';
+import { PluginRegistryPanel } from './PluginRegistryPanel';
 
 const statusTone: Record<DeploymentStatus, string> = {
   PROPOSED: 'border-slate-200 bg-slate-50 text-slate-600',
@@ -215,6 +216,7 @@ export function DeploymentCenter() {
       <section className="theme-card rounded-2xl border border-slate-200 p-5 shadow-sm"><div className="flex items-center justify-between"><div><h3 className="font-bold text-slate-900">{t('deployment.runManifests')}</h3><p className="mt-1 text-xs text-slate-500">{t('deployment.runManifestHint')}</p></div><FileClock size={18} className="text-slate-400" /></div><div className="mt-4 overflow-x-auto"><table className="w-full min-w-[760px] text-left text-xs"><thead className="text-[9px] uppercase tracking-wider text-slate-400"><tr><th className="pb-2">Task</th><th className="pb-2">Build</th><th className="pb-2">Model config</th><th className="pb-2">Device</th><th className="pb-2">World</th><th className="pb-2">Time</th></tr></thead><tbody className="divide-y divide-slate-100">{manifests.filter(item => !selectedAgent || item.agent_id === selectedAgent).slice(0, 20).map(item => <tr key={item.manifest_id}><td className="py-3 font-mono text-[10px] text-slate-700">{item.task_id}</td><td className="py-3 font-mono text-[10px] text-sky-700">{item.agent_build_id}</td><td className="max-w-48 truncate py-3 font-mono text-[9px] text-slate-400">{item.model_config_version}</td><td className="py-3 text-slate-500">{item.device_id || '—'}</td><td className="py-3 text-slate-500">{item.world_revision}</td><td className="py-3 text-slate-400">{new Date(item.created_at).toLocaleString()}</td></tr>)}</tbody></table></div></section>
       <section className="theme-card rounded-2xl border border-slate-200 p-5 shadow-sm"><div className="flex items-center gap-2"><RotateCcw size={17} className="text-amber-600" /><h3 className="font-bold text-slate-900">{t('deployment.rollbackHistory')}</h3></div><p className="mt-1 text-xs text-slate-500">{t('deployment.rollbackHistoryHint')}</p><div className="mt-4 space-y-2">{rollbacks.filter(item => !selectedAgent || item.agent_id === selectedAgent).slice(0, 10).map(item => <div key={item.rollback_id} className="rounded-xl border border-slate-200 bg-slate-50 p-3"><p className="font-mono text-[9px] text-slate-400">{item.from_build_id.slice(0, 12)} → {item.to_build_id.slice(0, 12)}</p><p className="mt-1 text-xs font-bold text-slate-700">{item.reason}</p><p className="mt-1 text-[9px] text-slate-400">{new Date(item.created_at).toLocaleString()}</p></div>)}{rollbacks.filter(item => !selectedAgent || item.agent_id === selectedAgent).length === 0 && <p className="rounded-xl bg-slate-50 p-3 text-xs text-slate-400">{t('deployment.noRollbacks')}</p>}</div></section>
     </div>
+    <PluginRegistryPanel />
   </div>;
 }
 

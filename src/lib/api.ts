@@ -34,6 +34,8 @@ import type {
 	PersistentGoal,
 	GoalState,
 	GoalCheckpoint,
+	PluginProvider,
+	PluginInvocationTrace,
 } from '../types';
 import {
   ATHENA_PROTOCOL,
@@ -437,6 +439,31 @@ export const deploymentApi = {
     const query = new URLSearchParams({ limit: '100' });
     if (agentId) query.set('agent_id', agentId);
     const value = await readJson<{ items: DeploymentRollback[] }>(await apiFetch(`${API_BASE}/deployment/rollbacks?${query}`));
+    return value.items || [];
+  },
+};
+
+export const pluginRegistryApi = {
+  async list(): Promise<PluginProvider[]> {
+    const value = await readJson<{ items: PluginProvider[] }>(await apiFetch(`${API_BASE}/plugins`));
+    return value.items || [];
+  },
+  async install(payload: { manifest: unknown; signature: unknown; sbom: unknown; visibility: 'private' | 'public'; activate: boolean }): Promise<PluginProvider> {
+    return readJson<PluginProvider>(await apiFetch(`${API_BASE}/plugins/install`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }));
+  },
+  async transition(provider: PluginProvider, status: 'ACTIVE' | 'DISABLED' | 'REVOKED', reason = ''): Promise<PluginProvider> {
+    const path = `${encodeURIComponent(provider.provider_id)}/${encodeURIComponent(provider.version)}`;
+    return readJson<PluginProvider>(await apiFetch(`${API_BASE}/plugins/${path}/status`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status, reason, expected_revision: provider.revision }) }));
+  },
+  async approve(provider: PluginProvider): Promise<PluginProvider> {
+    const path = `${encodeURIComponent(provider.provider_id)}/${encodeURIComponent(provider.version)}`;
+    return readJson<PluginProvider>(await apiFetch(`${API_BASE}/plugins/${path}/review`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scan_status: 'PASSED', review_status: 'APPROVED', expected_revision: provider.revision }) }));
+  },
+  async reload(): Promise<Record<string, unknown>> {
+    return readJson<Record<string, unknown>>(await apiFetch(`${API_BASE}/plugins/reload`, { method: 'POST' }));
+  },
+  async audit(limit = 50): Promise<PluginInvocationTrace[]> {
+    const value = await readJson<{ items: PluginInvocationTrace[] }>(await apiFetch(`${API_BASE}/plugins/audit?limit=${limit}`));
     return value.items || [];
   },
 };
