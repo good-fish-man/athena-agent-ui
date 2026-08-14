@@ -418,6 +418,8 @@ export interface OperationsSLOSnapshot {
   window_end: string;
   requests: number;
   errors: number;
+  rejected_requests: number;
+  timed_out_requests: number;
   availability: number;
   p95_latency_ms: number;
   dropped_events: number;
@@ -458,6 +460,11 @@ export interface BackupManifest {
   created_at: string;
   completed_at?: string;
   manifest_sha256: string;
+  integrity: {
+    algorithm: 'HMAC-SHA256';
+    key_id: string;
+    value: string;
+  };
 }
 
 export type GAReadinessStatus = 'PASS' | 'FAIL' | 'BLOCKED' | 'EXTERNAL_REQUIRED' | 'NOT_RUN';

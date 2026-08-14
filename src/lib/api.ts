@@ -184,6 +184,16 @@ export const experienceApi = {
   async delete(id: string): Promise<void> {
     await readJson(await apiFetch(`${API_BASE}/experience/${encodeURIComponent(id)}`, { method: 'DELETE' }));
   },
+  async export(): Promise<unknown> {
+    return readJson(await apiFetch(`${API_BASE}/experience/export`));
+  },
+  async deleteAll(): Promise<{ deleted: number }> {
+    return readJson(await apiFetch(`${API_BASE}/experience`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirmation: 'DELETE ALL EXPERIENCE' }),
+    }));
+  },
   async search(request: ExperienceSearchRequest): Promise<{ items: ExperienceSearchHit[]; historical_only: true }> {
     return readJson(await apiFetch(`${API_BASE}/experience/search`, {
       method: 'POST',
@@ -815,6 +825,16 @@ export const memoryApi = {
   },
   async delete(ulid: string): Promise<void> {
     await readJson(await apiFetch(`${API_BASE}/memory/${ulid}`, { method: 'DELETE' }));
+  },
+  async export(): Promise<unknown> {
+    return readJson(await apiFetch(`${API_BASE}/memory/export`));
+  },
+  async deleteAll(): Promise<{ deleted: number }> {
+    return readJson(await apiFetch(`${API_BASE}/memory`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirmation: 'DELETE ALL MEMORY' }),
+    }));
   },
 };
 

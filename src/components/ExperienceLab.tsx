@@ -8,6 +8,7 @@ import {
   ChevronRight,
   Clock3,
   DatabaseZap,
+  Download,
   Eraser,
   FlaskConical,
   Gauge,
@@ -27,7 +28,7 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
-import { experienceApi } from '../lib/api';
+import { experienceApi, memoryApi } from '../lib/api';
 import { cn } from '../lib/utils';
 import { LearningStudio } from './LearningStudio';
 import { DeploymentCenter } from './DeploymentCenter';
@@ -263,6 +264,40 @@ export function ExperienceLab() {
     }
   };
 
+  const exportPrivateData = async () => {
+    setBusy('privacy-export');
+    try {
+      const [memory, experience] = await Promise.all([memoryApi.export(), experienceApi.export()]);
+      const payload = JSON.stringify({ schema: 'athena.user-data-export.v1', exported_at: new Date().toISOString(), memory, experience }, null, 2);
+      const url = URL.createObjectURL(new Blob([payload], { type: 'application/json' }));
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `athena-private-data-${new Date().toISOString().slice(0, 10)}.json`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      toast.success(t('experience.exported'));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t('experience.exportFailed'));
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const clearPrivateData = async (kind: 'memory' | 'experience') => {
+    const confirmationKey = kind === 'memory' ? 'experience.deleteAllMemoryConfirm' : 'experience.deleteAllExperienceConfirm';
+    if (!window.confirm(t(confirmationKey))) return;
+    setBusy(`privacy-delete:${kind}`);
+    try {
+      const result = kind === 'memory' ? await memoryApi.deleteAll() : await experienceApi.deleteAll();
+      toast.success(t('experience.deletedPrivateData', { count: result.deleted }));
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t('experience.deletePrivateDataFailed'));
+    } finally {
+      setBusy('');
+    }
+  };
+
   const removeExperience = async (item: ExperienceRecord) => {
     if (!window.confirm(t('experience.deleteConfirm'))) return;
     setBusy(item.experience_id);
@@ -411,10 +446,20 @@ export function ExperienceLab() {
                     </label>
                   </div>
                 </div>
-                <button type="button" onClick={() => void savePreference()} disabled={busy === 'preference'} className="flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-5 py-3 text-xs font-bold text-white transition hover:bg-slate-800 disabled:opacity-50">
-                  {busy === 'preference' ? <Loader2 size={15} className="animate-spin" /> : <LockKeyhole size={15} />}
-                  {t('experience.savePreference')}
-                </button>
+                <div className="grid min-w-52 gap-2">
+                  <button type="button" onClick={() => void savePreference()} disabled={busy === 'preference'} className="flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-5 py-3 text-xs font-bold text-white transition hover:bg-slate-800 disabled:opacity-50">
+                    {busy === 'preference' ? <Loader2 size={15} className="animate-spin" /> : <LockKeyhole size={15} />}
+                    {t('experience.savePreference')}
+                  </button>
+                  <button type="button" onClick={() => void exportPrivateData()} disabled={busy === 'privacy-export'} className="flex items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-2.5 text-xs font-bold text-emerald-700 hover:bg-emerald-100 disabled:opacity-50">
+                    {busy === 'privacy-export' ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
+                    {t('experience.exportPrivateData')}
+                  </button>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button type="button" onClick={() => void clearPrivateData('memory')} disabled={busy.startsWith('privacy-delete:')} className="rounded-xl border border-red-200 px-3 py-2.5 text-[10px] font-bold text-red-600 hover:bg-red-50 disabled:opacity-50">{t('experience.deleteAllMemory')}</button>
+                    <button type="button" onClick={() => void clearPrivateData('experience')} disabled={busy.startsWith('privacy-delete:')} className="rounded-xl border border-red-200 px-3 py-2.5 text-[10px] font-bold text-red-600 hover:bg-red-50 disabled:opacity-50">{t('experience.deleteAllExperience')}</button>
+                  </div>
+                </div>
               </section>
             )}
 
