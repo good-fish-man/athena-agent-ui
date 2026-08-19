@@ -428,11 +428,27 @@ export interface OperationsSLOSnapshot {
   upgrade_successes: number;
 }
 
+export interface DelegationOperationalSLOSnapshot {
+  schema: 'athena.dso.v0alpha';
+  window_started_at: string;
+  window_ended_at: string;
+  total_runs: number;
+  terminal_runs: number;
+  failed_runs: number;
+  recovered_attempts: number;
+  fenced_late_results: number;
+  duplicate_confirmed_side_effects: number;
+  availability: number;
+  cancel_propagation_p95_ms: number;
+  generated_at: string;
+}
+
 export interface OperationsSnapshot {
   schema: 'athena.operations.v1';
   health: OperationsHealthSnapshot;
   runtime_health?: OperationsHealthSnapshot;
   slo?: OperationsSLOSnapshot;
+  delegation_slo?: DelegationOperationalSLOSnapshot;
   online_devices: number;
   total_devices: number;
   recovery_managed: boolean;

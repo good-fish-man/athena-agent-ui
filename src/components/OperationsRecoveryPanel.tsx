@@ -144,6 +144,11 @@ export function OperationsRecoveryPanel() {
         <Summary icon={CheckCircle2} label={t('operations.availability')} value={snapshot.slo ? `${(snapshot.slo.availability * 100).toFixed(3)}%` : '—'} />
       </div>
 
+      {snapshot.delegation_slo && <div className={cn('mt-5 rounded-2xl border p-4', snapshot.delegation_slo.duplicate_confirmed_side_effects === 0 && snapshot.delegation_slo.availability >= 0.999 && snapshot.delegation_slo.cancel_propagation_p95_ms <= 5000 ? 'border-emerald-200 bg-emerald-50/70' : 'border-amber-200 bg-amber-50/70')}>
+        <div className="flex flex-col justify-between gap-2 md:flex-row md:items-center"><div><div className="flex items-center gap-2"><ShieldCheck size={16} className="text-emerald-700" /><h4 className="text-xs font-black uppercase tracking-wider text-slate-700">{t('operations.delegationRecovery')}</h4></div><p className="mt-1 text-[10px] text-slate-500">{t('operations.delegationRecoveryHint')}</p></div><span className="font-mono text-[9px] text-slate-400">24h · {new Date(snapshot.delegation_slo.generated_at).toLocaleString()}</span></div>
+        <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6"><SmallMetric label={t('operations.delegationRuns')} value={snapshot.delegation_slo.total_runs} /><SmallMetric label={t('operations.delegationAvailability')} value={`${(snapshot.delegation_slo.availability * 100).toFixed(3)}%`} /><SmallMetric label={t('operations.cancelP95')} value={`${snapshot.delegation_slo.cancel_propagation_p95_ms} ms`} /><SmallMetric label={t('operations.recoveredAttempts')} value={snapshot.delegation_slo.recovered_attempts} /><SmallMetric label={t('operations.fencedLateResults')} value={snapshot.delegation_slo.fenced_late_results} /><SmallMetric label={t('operations.confirmedDuplicates')} value={snapshot.delegation_slo.duplicate_confirmed_side_effects} /></div>
+      </div>}
+
       {readiness && <div className="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white">
         <div className="flex flex-col justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-4 md:flex-row md:items-center">
           <div><div className="flex items-center gap-2"><ListChecks size={16} className="text-sky-600" /><h4 className="text-xs font-black uppercase tracking-wider text-slate-700">{t('operations.gaReadiness')}</h4><span className={cn('rounded-full border px-2 py-1 text-[9px] font-black', readinessTone[readiness.status])}>{readiness.status}</span></div><p className="mt-1 text-[10px] text-slate-400">{t('operations.gaReadinessHint', { version: readiness.release_version })}</p></div>
@@ -186,7 +191,7 @@ function Summary({ icon: Icon, label, value, tone }: { icon: React.ComponentType
   return <div className="rounded-xl border border-slate-200 bg-slate-50 p-3"><div className="flex items-center gap-2 text-[9px] font-black uppercase tracking-wider text-slate-400"><Icon size={13} />{label}</div><span className={cn('mt-2 inline-flex rounded-full border border-transparent px-2 py-1 font-mono text-xs font-black text-slate-800', tone)}>{value}</span></div>;
 }
 
-function SmallMetric({ label, value }: { label: string; value: number }) {
+function SmallMetric({ label, value }: { label: string; value: number | string }) {
   return <div className="rounded-lg border border-slate-200 bg-white p-2"><p className="text-[8px] font-black uppercase tracking-wider text-slate-400">{label}</p><p className="mt-1 font-mono text-xs font-black text-slate-700">{value}</p></div>;
 }
 
