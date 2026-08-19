@@ -60,7 +60,7 @@ import { useDropzone } from 'react-dropzone';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
 import { cn } from '../lib/utils';
-import { Message, FileInfo, Agent, Conversation, PendingApproval, ChatSession, type BrowserSuggestedAction, type ControlObservation, type ResearchSourcePage, type SpecialistProgressNode } from '../types';
+import { Message, FileInfo, Agent, Conversation, PendingApproval, ChatSession, type BrowserSuggestedAction, type ControlObservation, type ResearchSourcePage, type SpecialistProgressNode, type TemporarySpecialistProgress } from '../types';
 import { agentApi, chatApi, controlApi, REPORT_API_BASE, siteCredentialApi, type RunHistoryMessage, type SiteCredential } from '../lib/api';
 import { useTranslation } from 'react-i18next';
 import { authStore } from '../lib/auth';
@@ -882,6 +882,7 @@ function toolCallsWithProgress(toolCalls: Message['toolCalls'], data: any): Mess
   const pages = normalizeResearchPages(data.state?.valuable_pages);
   const queryTexts = normalizeResearchQueryTexts(data.state?.query_texts);
   const specialistNodes = normalizeSpecialistNodes(data.state?.nodes);
+  const temporarySpecialist = normalizeTemporarySpecialist(data.state);
   const update = (call: NonNullable<Message['toolCalls']>[number]) => ({
     ...call,
     result: formatProgressResult(data),
@@ -899,6 +900,7 @@ function toolCallsWithProgress(toolCalls: Message['toolCalls'], data: any): Mess
     specialistNodes: specialistNodes.length > 0 ? specialistNodes : call.specialistNodes,
     configuredParallelism: typeof data.state?.configured_parallelism === 'number' ? data.state.configured_parallelism : call.configuredParallelism,
     effectiveParallelism: typeof data.state?.effective_parallelism === 'number' ? data.state.effective_parallelism : call.effectiveParallelism,
+    temporarySpecialist: temporarySpecialist ?? call.temporarySpecialist,
     status: completed ? 'completed' as const : 'running' as const,
   });
   if (updateIndex >= 0) {
@@ -927,6 +929,18 @@ function normalizeSpecialistNodes(value: unknown): SpecialistProgressNode[] {
       dependsOn: Array.isArray(node.depends_on) ? node.depends_on.filter((dependency): dependency is string => typeof dependency === 'string') : [],
     }];
   });
+}
+
+function normalizeTemporarySpecialist(value: unknown): TemporarySpecialistProgress | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const state = value as Record<string, unknown>;
+  if (state.temporary_specialist !== true || typeof state.overlay_id !== 'string' || typeof state.base_profile_ref !== 'string' || typeof state.role !== 'string' || typeof state.admission_decision_id !== 'string') return undefined;
+  return {
+    overlayId: state.overlay_id,
+    baseProfileRef: state.base_profile_ref,
+    role: state.role,
+    admissionDecisionId: state.admission_decision_id,
+  };
 }
 
 function specialistStatusClass(status: string): string {
@@ -3033,6 +3047,17 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent, on
 										  </div>
 										))}
 									  </div>
+									</div>
+								  )}
+								  {isResearch && tool.temporarySpecialist && (
+									<div className="mt-2 rounded-xl border border-cyan-200 bg-cyan-50/80 p-2.5 text-[10px] text-cyan-900">
+									  <div className="flex items-center justify-between gap-3">
+										<span className="font-bold uppercase tracking-[0.12em]">{t('chat.temporarySpecialist')}</span>
+										<span className="rounded-full bg-white px-2 py-1 font-mono text-[8px] text-cyan-700">{t('chat.overlayAdmitted')}</span>
+									  </div>
+									  <div className="mt-2 font-semibold">{tool.temporarySpecialist.role}</div>
+									  <div className="mt-1 truncate text-cyan-700">{t('chat.baseProfile')}: {tool.temporarySpecialist.baseProfileRef}</div>
+									  <div className="mt-1 truncate text-cyan-700">{t('chat.overlayAudit')}: {tool.temporarySpecialist.admissionDecisionId}</div>
 									</div>
 								  )}
 								</div>

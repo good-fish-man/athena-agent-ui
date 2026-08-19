@@ -1136,6 +1136,13 @@ export interface SpecialistProgressNode {
   dependsOn: string[];
 }
 
+export interface TemporarySpecialistProgress {
+  overlayId: string;
+  baseProfileRef: string;
+  role: string;
+  admissionDecisionId: string;
+}
+
 export interface Message {
   id: string;
   role: 'user' | 'assistant';
@@ -1163,6 +1170,7 @@ export interface Message {
     specialistNodes?: SpecialistProgressNode[];
     configuredParallelism?: number;
     effectiveParallelism?: number;
+    temporarySpecialist?: TemporarySpecialistProgress;
     status?: 'pending' | 'running' | 'completed' | 'error';
     observation?: ControlObservation;
     suggestedActions?: BrowserSuggestedAction[];
