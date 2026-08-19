@@ -1129,6 +1129,13 @@ export interface RecallTestRecord {
   }[];
 }
 
+export interface SpecialistProgressNode {
+  nodeId: string;
+  role: string;
+  status: string;
+  dependsOn: string[];
+}
+
 export interface Message {
   id: string;
   role: 'user' | 'assistant';
@@ -1152,6 +1159,10 @@ export interface Message {
 	researchConfidence?: number;
 	researchQueryTexts?: string[];
 	researchPages?: ResearchSourcePage[];
+    parallelPlanId?: string;
+    specialistNodes?: SpecialistProgressNode[];
+    configuredParallelism?: number;
+    effectiveParallelism?: number;
     status?: 'pending' | 'running' | 'completed' | 'error';
     observation?: ControlObservation;
     suggestedActions?: BrowserSuggestedAction[];

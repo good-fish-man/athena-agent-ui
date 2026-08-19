@@ -60,7 +60,7 @@ import { useDropzone } from 'react-dropzone';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
 import { cn } from '../lib/utils';
-import { Message, FileInfo, Agent, Conversation, PendingApproval, ChatSession, type BrowserSuggestedAction, type ControlObservation, type ResearchSourcePage } from '../types';
+import { Message, FileInfo, Agent, Conversation, PendingApproval, ChatSession, type BrowserSuggestedAction, type ControlObservation, type ResearchSourcePage, type SpecialistProgressNode } from '../types';
 import { agentApi, chatApi, controlApi, REPORT_API_BASE, siteCredentialApi, type RunHistoryMessage, type SiteCredential } from '../lib/api';
 import { useTranslation } from 'react-i18next';
 import { authStore } from '../lib/auth';
@@ -881,6 +881,7 @@ function toolCallsWithProgress(toolCalls: Message['toolCalls'], data: any): Mess
   const updateIndex = targetIndex >= 0 ? targetIndex : lastRunningToolCallIndex(calls);
   const pages = normalizeResearchPages(data.state?.valuable_pages);
   const queryTexts = normalizeResearchQueryTexts(data.state?.query_texts);
+  const specialistNodes = normalizeSpecialistNodes(data.state?.nodes);
   const update = (call: NonNullable<Message['toolCalls']>[number]) => ({
     ...call,
     result: formatProgressResult(data),
@@ -894,6 +895,10 @@ function toolCallsWithProgress(toolCalls: Message['toolCalls'], data: any): Mess
     researchConfidence: typeof data.state?.confidence === 'number' ? data.state.confidence : call.researchConfidence,
     researchQueryTexts: queryTexts.length > 0 ? queryTexts : call.researchQueryTexts,
     researchPages: pages.length > 0 ? pages : call.researchPages,
+    parallelPlanId: typeof data.state?.parallel_plan_id === 'string' ? data.state.parallel_plan_id : call.parallelPlanId,
+    specialistNodes: specialistNodes.length > 0 ? specialistNodes : call.specialistNodes,
+    configuredParallelism: typeof data.state?.configured_parallelism === 'number' ? data.state.configured_parallelism : call.configuredParallelism,
+    effectiveParallelism: typeof data.state?.effective_parallelism === 'number' ? data.state.effective_parallelism : call.effectiveParallelism,
     status: completed ? 'completed' as const : 'running' as const,
   });
   if (updateIndex >= 0) {
@@ -907,6 +912,33 @@ function toolCallsWithProgress(toolCalls: Message['toolCalls'], data: any): Mess
       args: {},
     }),
   ];
+}
+
+function normalizeSpecialistNodes(value: unknown): SpecialistProgressNode[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item): SpecialistProgressNode[] => {
+    if (!item || typeof item !== 'object') return [];
+    const node = item as Record<string, unknown>;
+    if (typeof node.node_id !== 'string' || typeof node.role !== 'string' || typeof node.status !== 'string') return [];
+    return [{
+      nodeId: node.node_id,
+      role: node.role,
+      status: node.status,
+      dependsOn: Array.isArray(node.depends_on) ? node.depends_on.filter((dependency): dependency is string => typeof dependency === 'string') : [],
+    }];
+  });
+}
+
+function specialistStatusClass(status: string): string {
+  switch (status.toUpperCase()) {
+    case 'COMPLETED': return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+    case 'RUNNING': return 'border-amber-200 bg-amber-50 text-amber-700';
+    case 'FAILED':
+    case 'BUDGET_REJECTED': return 'border-rose-200 bg-rose-50 text-rose-700';
+    case 'WAITING_USER': return 'border-sky-200 bg-sky-50 text-sky-700';
+    case 'PARTIAL': return 'border-orange-200 bg-orange-50 text-orange-700';
+    default: return 'border-slate-200 bg-white text-slate-500';
+  }
 }
 
 function progressCompleted(data: any): boolean {
@@ -2982,6 +3014,25 @@ export function ChatInterface({ preselectedAgent, onAgentUsed, onCreateAgent, on
 									  {typeof tool.searchQueries === 'number' && <span className="rounded-full bg-white px-2 py-1 ring-1 ring-slate-100">{t('chat.researchQueries')}: {tool.searchQueries}</span>}
 									  {typeof tool.researchSources === 'number' && <span className="rounded-full bg-white px-2 py-1 ring-1 ring-slate-100">{t('chat.researchSources')}: {tool.researchSources}</span>}
 									  {typeof tool.researchConfidence === 'number' && tool.researchConfidence > 0 && <span className="rounded-full bg-white px-2 py-1 ring-1 ring-slate-100">{t('chat.researchConfidence')}: {Math.round(tool.researchConfidence * 100)}%</span>}
+									</div>
+								  )}
+								  {isResearch && tool.specialistNodes && tool.specialistNodes.length > 0 && (
+									<div className="mt-2 rounded-xl border border-slate-200 bg-white/80 p-2.5">
+									  <div className="mb-2 flex items-center justify-between gap-3 text-[9px] font-bold uppercase tracking-[0.14em] text-slate-400">
+										<span className="flex items-center gap-1.5"><CircleDot size={11} />{t('chat.specialistDAG')}</span>
+										<span>{t('chat.specialistParallelism')}: {tool.effectiveParallelism ?? tool.configuredParallelism ?? 1}/{tool.configuredParallelism ?? 1}</span>
+									  </div>
+									  <div className="grid gap-1.5 sm:grid-cols-2">
+										{tool.specialistNodes.map(node => (
+										  <div key={node.nodeId} className={cn('rounded-lg border px-2.5 py-2 text-[10px]', specialistStatusClass(node.status))}>
+											<div className="flex items-center justify-between gap-2">
+											  <span className="truncate font-bold">{node.role.replaceAll('_', ' ')}</span>
+											  <span className="shrink-0 font-mono text-[8px] uppercase">{t(`chat.specialistStatuses.${node.status}`, { defaultValue: node.status })}</span>
+											</div>
+											{node.dependsOn.length > 0 && <div className="mt-1 truncate opacity-70">{t('chat.specialistDependsOn')}: {node.dependsOn.join(' + ')}</div>}
+										  </div>
+										))}
+									  </div>
 									</div>
 								  )}
 								</div>
