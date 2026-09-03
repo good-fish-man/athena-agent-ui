@@ -575,6 +575,134 @@ function browserSafeResolution(value: unknown): Record<string, unknown> | undefi
   });
 }
 
+function browserSafeScalar(value: unknown): string | number | boolean | undefined {
+	return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' ? value : undefined;
+}
+
+function browserSafeEvidenceRefs(value: unknown): string[] | undefined {
+	if (!Array.isArray(value)) return undefined;
+	const refs = value.map(item => browserText(item, 240)).filter((item): item is string => Boolean(item)).slice(0, 8);
+	return refs.length > 0 ? refs : undefined;
+}
+
+function browserSafeEffectValue(value: unknown): unknown {
+	const scalar = browserSafeScalar(value);
+	if (scalar !== undefined) return scalar;
+	if (Array.isArray(value)) {
+		const values = value.map(browserSafeScalar).filter((item): item is string | number | boolean => item !== undefined).slice(0, 8);
+		return values.length > 0 ? values : undefined;
+	}
+	const source = browserRecord(value);
+	if (!source) return undefined;
+	const safe = compactRecord({
+		playing: browserBoolean(source.playing),
+		paused: browserBoolean(source.paused),
+		verified: browserBoolean(source.verified),
+		changed: browserBoolean(source.changed),
+		explicit: browserBoolean(source.explicit),
+		closed: browserBoolean(source.closed),
+		selected: browserBoolean(source.selected),
+		value: browserSafeScalar(source.value),
+		entity_ref: browserText(source.entity_ref, 240),
+		label: browserText(source.label, 240),
+		url: browserURL(source.url),
+	});
+	return Object.keys(safe).length > 0 ? safe : undefined;
+}
+
+function browserSafeEffectClause(value: unknown): Record<string, unknown> | undefined {
+	const source = browserRecord(value);
+	if (!source) return undefined;
+	return compactRecord({
+		clause_id: browserText(source.clause_id, 160),
+		kind: browserText(source.kind, 40),
+		subject: browserText(source.subject, 120),
+		predicate: browserText(source.predicate, 120),
+		operator: browserText(source.operator, 40),
+		expected: browserSafeEffectValue(source.expected),
+		required: browserBoolean(source.required),
+	});
+}
+
+function browserSafeEffectTrace(value: unknown): Record<string, unknown> | undefined {
+	const source = browserRecord(value);
+	if (!source) return undefined;
+	const outcome = browserRecord(source.outcome);
+	const targetSpec = browserRecord(outcome?.target_spec);
+	const selector = browserRecord(targetSpec?.selector);
+	const policy = browserRecord(source.policy_decision);
+	const run = browserRecord(source.plan_run);
+	const summary = browserRecord(source.verification_summary);
+	const targetResolution = browserRecord(source.target_resolution);
+	const desiredEffects = Array.isArray(outcome?.desired_effects)
+		? outcome.desired_effects.map(browserSafeEffectClause).filter(Boolean).slice(0, 8)
+		: [];
+	const results = Array.isArray(summary?.results)
+		? summary.results.map(item => {
+			const result = browserRecord(item) || {};
+			return compactRecord({
+				effect_clause_id: browserText(result.effect_clause_id, 160),
+				status: browserText(result.status, 40),
+				reason: browserText(result.reason, 320),
+				confidence: browserNumber(result.confidence),
+				expected_value: browserSafeEffectValue(result.expected_value),
+				observed_value: browserSafeEffectValue(result.observed_value),
+				evidence_refs: browserSafeEvidenceRefs(result.evidence_refs),
+			});
+		}).slice(0, 12)
+		: [];
+	return compactRecord({
+		schema: browserText(source.schema, 120),
+		outcome: outcome ? compactRecord({
+			outcome_id: browserText(outcome.outcome_id, 160),
+			goal: browserText(outcome.goal, 500),
+			target_spec: targetSpec ? compactRecord({
+				target_spec_id: browserText(targetSpec.target_spec_id, 160),
+				collection_ref: browserText(targetSpec.collection_ref, 160),
+				selector: selector ? compactRecord({
+					type: browserText(selector.type, 40),
+					value: browserText(selector.value, 240),
+					ordinal: browserNumber(selector.ordinal),
+					role: browserText(selector.role, 80),
+					kind: browserText(selector.kind, 80),
+				}) : undefined,
+			}) : undefined,
+			desired_effects: desiredEffects,
+		}) : undefined,
+		policy_decision: policy ? compactRecord({
+			decision_id: browserText(policy.decision_id, 160),
+			decision: browserText(policy.decision, 40),
+			policy_version: browserText(policy.policy_version, 80),
+			reasons: Array.isArray(policy.reasons) ? policy.reasons.map(item => browserText(item, 240)).filter(Boolean).slice(0, 4) : undefined,
+		}) : undefined,
+		plan_run: run ? compactRecord({
+			plan_run_id: browserText(run.plan_run_id, 160),
+			status: browserText(run.status, 40),
+			terminal_reason: browserText(run.terminal_reason, 320),
+		}) : undefined,
+		target_resolution: targetResolution ? compactRecord({
+			resolution_id: browserText(targetResolution.resolution_id, 160),
+			status: browserText(targetResolution.status, 40),
+			selected_entity_ref: browserText(targetResolution.selected_entity_ref, 500),
+			source_snapshot_ref: browserText(targetResolution.source_snapshot_ref, 240),
+			world_read_set_hash: browserText(targetResolution.world_read_set_hash, 160),
+			evidence_refs: browserSafeEvidenceRefs(targetResolution.evidence_refs),
+			confidence: browserNumber(targetResolution.confidence),
+			reason: browserText(targetResolution.reason, 320),
+		}) : undefined,
+		verification_summary: summary ? compactRecord({
+			status: browserText(summary.status, 40),
+			satisfied: browserNumber(summary.satisfied),
+			unsatisfied: browserNumber(summary.unsatisfied),
+			unknown: browserNumber(summary.unknown),
+			conflicting: browserNumber(summary.conflicting),
+			total: browserNumber(summary.total),
+			evidence_refs: browserSafeEvidenceRefs(summary.evidence_refs),
+			results,
+		}) : undefined,
+	});
+}
+
 function browserSafeInteractions(value: unknown): Record<string, unknown>[] {
   if (!Array.isArray(value)) return [];
   return value.map(item => {
@@ -685,7 +813,7 @@ function browserSafeAutomation(value: unknown): Record<string, unknown> | undefi
 function browserSafeObservation(value: unknown): ControlObservation | undefined {
 	const source = browserRecord(value);
 	const state = browserRecord(source?.state);
-	if (!source || source.protocol !== ATHENA_PROTOCOL || !state || (!state.browser_task && !state.automation_state && !state.capability_handoff)) return undefined;
+	if (!source || source.protocol !== ATHENA_PROTOCOL || !state || (!state.browser_task && !state.automation_state && !state.capability_handoff && !state.effect_trace)) return undefined;
 	const observationId = browserText(source.observation_id, 160);
 	const taskId = browserText(source.task_id, 160);
 	const stepId = browserText(source.step_id, 160);
@@ -706,7 +834,8 @@ function browserSafeObservation(value: unknown): ControlObservation | undefined 
       playing: browserBoolean(playback.playing),
       title: browserText(playback.title, 240),
     }) : undefined,
-    browser_task: browserSafeTask(state.browser_task),
+		browser_task: browserSafeTask(state.browser_task),
+		effect_trace: browserSafeEffectTrace(state.effect_trace),
     automation_state: browserSafeAutomation(state.automation_state),
     capability_handoff: handoff ? compactRecord({
       schema: browserText(handoff.schema, 120),

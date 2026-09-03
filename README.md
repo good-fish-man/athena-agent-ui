@@ -93,7 +93,11 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
-The default development administrator created by the backend is `athena` / `athena`. It is initialized only when absent, so restarting does not reset a changed password. Replace it outside a trusted local development environment.
+The backend has no fixed development password. A managed Launcher installation
+uses the `athena` username and stores its installation-specific bootstrap
+password in `~/.athena/secrets/bootstrap-admin.password` with owner-only
+permissions. A standalone Runtime Client creates an administrator only when its
+bootstrap environment variables are explicitly supplied.
 
 Do not open `index.html` with a `file://` URL. Vite builds use ES modules and browser routing, so the application must be served over HTTP using `npm run dev`, `npm run preview`, Nginx, or Athena Launcher.
 

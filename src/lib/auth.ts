@@ -5,6 +5,7 @@ export interface AuthUser {
   member_code: string;
   nick_name: string;
   avatar_url?: string;
+	organization_id?: string;
 	admin_level?: number;
 }
 

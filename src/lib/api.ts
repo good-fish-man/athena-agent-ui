@@ -23,9 +23,12 @@ import type {
   DeploymentRollback,
   DeploymentExposure,
   LearnedSkill,
+  LearnedStrategy,
   LearningCandidate,
   LearningCandidateEvidence,
   LearningCandidateEvaluation,
+  LearningEvolutionScanResult,
+  LearningEvolutionStatus,
   KnowledgeClaim,
   KnowledgeContradiction,
   KnowledgeEvidence,
@@ -40,7 +43,8 @@ import type {
 	PluginInvocationTrace,
 	PluginPermissionSet,
 	OperationsSnapshot,
-	BackupManifest,
+  BackupManifest,
+  BackupInventory,
 	GAReadinessReport,
 	GoldenJourney,
 	GoldenJourneyResult,
@@ -147,6 +151,7 @@ export interface ExperienceSearchRequest {
   environment_fingerprint?: string;
   failure_class?: string;
   capability?: string;
+  skill?: string;
   outcome?: ExperienceOutcome | '';
   budget?: {
     max_results?: number;
@@ -252,6 +257,12 @@ export const experienceApi = {
 };
 
 export const learningApi = {
+  async evolutionStatus(): Promise<LearningEvolutionStatus> {
+    return readJson(await apiFetch(`${API_BASE}/learning/evolution/status`));
+  },
+  async scanEvolution(): Promise<LearningEvolutionScanResult> {
+    return readJson(await apiFetch(`${API_BASE}/learning/evolution/scan`, { method: 'POST' }));
+  },
   async candidates(params: { kind?: string; status?: string; limit?: number; offset?: number } = {}): Promise<{ items: LearningCandidate[]; total: number }> {
     const query = new URLSearchParams();
     if (params.kind) query.set('kind', params.kind);
@@ -263,12 +274,12 @@ export const learningApi = {
   async candidate(id: string): Promise<{ candidate: LearningCandidate; evidence: LearningCandidateEvidence[]; evaluations: LearningCandidateEvaluation[] }> {
     return readJson(await apiFetch(`${API_BASE}/learning/candidates/${encodeURIComponent(id)}`));
   },
-  async generate(request: { kind: 'SKILL' | 'STRATEGY'; id?: string; description?: string; experience_ids?: string[]; minimum_score?: number; preferred_skill?: string }): Promise<LearningCandidate> {
+  async generate(request: { kind: 'SKILL' | 'STRATEGY'; id?: string; description?: string; experience_ids?: string[]; visibility?: 'PRIVATE' | 'TEAM' | 'PUBLIC'; minimum_score?: number; preferred_skill?: string }): Promise<LearningCandidate> {
     return readJson(await apiFetch(`${API_BASE}/learning/candidates/generate`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request),
     }));
   },
-  async review(id: string, request: { decision: 'APPROVE' | 'REJECT'; note?: string; expected_revision: number }): Promise<LearningCandidate> {
+  async review(id: string, request: { decision: 'APPROVE' | 'REJECT'; note: string; expected_revision: number }): Promise<LearningCandidate> {
     return readJson(await apiFetch(`${API_BASE}/learning/candidates/${encodeURIComponent(id)}/review`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request),
     }));
@@ -285,8 +296,12 @@ export const learningApi = {
       body: JSON.stringify({ expected_revision: expectedRevision }),
     }));
   },
-  async skills(): Promise<LearnedSkill[]> {
-    const value = await readJson<{ items: LearnedSkill[]; activation: 'manual_only' }>(await apiFetch(`${API_BASE}/learning/skills`));
+  async skills(limit = 200): Promise<LearnedSkill[]> {
+    const value = await readJson<{ items: LearnedSkill[]; activation: 'manual_only' }>(await apiFetch(`${API_BASE}/learning/skills?limit=${limit}`));
+    return value.items || [];
+  },
+  async strategies(limit = 200): Promise<LearnedStrategy[]> {
+    const value = await readJson<{ items: LearnedStrategy[]; activation: 'manual_only' }>(await apiFetch(`${API_BASE}/learning/strategies?limit=${limit}`));
     return value.items || [];
   },
   async demonstrations(): Promise<Demonstration[]> {
@@ -342,7 +357,7 @@ export const evidenceKnowledgeApi = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         text,
-        scopes: ['USER', 'PUBLIC'],
+        scopes: ['USER', 'ORGANIZATION', 'PUBLIC'],
         max_sensitivity: 'INTERNAL',
         as_of: new Date().toISOString(),
         include_expired: false,
@@ -367,21 +382,16 @@ export const goalApi = {
     return readJson<GoalState>(await apiFetch(`${API_BASE}/goals/${encodeURIComponent(id)}`));
   },
   async createResearch(request: { agent_id: string; objective: string; success: string; deadline?: string }): Promise<GoalState> {
-    const goal = await readJson<PersistentGoal>(await apiFetch(`${API_BASE}/goals`, {
+    return readJson<GoalState>(await apiFetch(`${API_BASE}/goals/planned`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
         agent_id: request.agent_id,
         objective: request.objective,
         constraints: ['Use registered capabilities only', 'Do not execute generated code', 'Stop when the bounded budget is exhausted'],
         success_criteria: [{ description: request.success, required: true }],
         deadline: request.deadline || undefined,
-      }),
-    }));
-    return readJson<GoalState>(await apiFetch(`${API_BASE}/goals/${encodeURIComponent(goal.goal_id)}/plan`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
-        expected_revision: goal.revision,
         tasks: [
           { task_id: 'research', depth: 1, specialist: 'RESEARCH', objective: request.objective, required_capabilities: ['internet.search', 'internet.fetch'] },
-          { task_id: 'synthesis', depth: 2, specialist: 'SYNTHESIS', objective: `Synthesize a verified answer for: ${request.objective}`, depends_on: ['research'] },
+          { task_id: 'synthesis', depth: 2, specialist: 'SYNTHESIS', objective: `Synthesize a verified answer for: ${request.objective}`, depends_on: ['research'], world_slice_refs: ['result.research.summary', 'result.research.evidence_refs'] },
         ],
       }),
     }));
@@ -391,9 +401,9 @@ export const goalApi = {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expected_revision: goal.revision, reason: 'paused by user' }),
     }));
   },
-  async resume(goal: PersistentGoal): Promise<{ goal: PersistentGoal }> {
+  async resume(goal: PersistentGoal, userInput = ''): Promise<{ goal: PersistentGoal }> {
     return readJson(await apiFetch(`${API_BASE}/goals/${encodeURIComponent(goal.goal_id)}/resume`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expected_revision: goal.revision }),
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expected_revision: goal.revision, user_input: userInput.trim() }),
     }));
   },
   async checkpoints(goalId: string): Promise<GoalCheckpoint[]> {
@@ -487,9 +497,9 @@ export const operationsApi = {
   async snapshot(): Promise<OperationsSnapshot> {
     return readJson<OperationsSnapshot>(await apiFetch(`${API_BASE}/operations/health`));
   },
-  async backups(): Promise<BackupManifest[]> {
-    const value = await readJson<{ items: BackupManifest[] }>(await apiFetch(`${API_BASE}/operations/backups`));
-    return value.items || [];
+  async backups(): Promise<BackupInventory> {
+    const value = await readJson<Partial<BackupInventory>>(await apiFetch(`${API_BASE}/operations/backups`));
+    return { items: value.items || [], configured: value.configured !== false, reason: value.reason };
   },
   async readiness(): Promise<GAReadinessReport> {
     return readJson<GAReadinessReport>(await apiFetch(`${API_BASE}/operations/readiness`));
@@ -499,12 +509,6 @@ export const operationsApi = {
   },
   async runGoldenJourneys(): Promise<GoldenJourneyResult[]> {
     const value = await readJson<{ items: GoldenJourneyResult[] }>(await apiFetch(`${API_BASE}/operations/golden-journeys/run`, { method: 'POST' }));
-    return value.items || [];
-  },
-  async recordGoldenJourneyEvidence(items: GoldenJourneyResult[]): Promise<GoldenJourneyResult[]> {
-    const value = await readJson<{ items: GoldenJourneyResult[] }>(await apiFetch(`${API_BASE}/operations/golden-journeys/evidence`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }),
-    }));
     return value.items || [];
   },
   async createBackup(): Promise<BackupManifest> {
@@ -579,6 +583,9 @@ export const controlApi = {
   },
   async bindDevice(deviceId: string): Promise<void> {
     await readJson(await apiFetch(`${RUNTIME_API_BASE}/control/devices/${encodeURIComponent(deviceId)}/bind`, { method: 'POST' }));
+  },
+  async unbindDevice(deviceId: string): Promise<void> {
+    await readJson(await apiFetch(`${RUNTIME_API_BASE}/control/devices/${encodeURIComponent(deviceId)}/binding`, { method: 'DELETE' }));
   },
 	async approvals(status = 'PENDING'): Promise<ControlApproval[]> {
 		const query = status ? `?status=${encodeURIComponent(status)}` : '';

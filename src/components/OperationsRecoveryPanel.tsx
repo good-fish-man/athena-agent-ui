@@ -45,6 +45,7 @@ export function OperationsRecoveryPanel() {
   const [loading, setLoading] = React.useState(true);
   const [busy, setBusy] = React.useState('');
   const [error, setError] = React.useState('');
+  const [backupConfigured, setBackupConfigured] = React.useState(false);
   const [restoreTarget, setRestoreTarget] = React.useState('');
   const [confirmation, setConfirmation] = React.useState('');
 
@@ -52,11 +53,15 @@ export function OperationsRecoveryPanel() {
     setLoading(true);
     setError('');
     try {
-      const [nextSnapshot, nextBackups, nextReadiness, nextJourneys] = await Promise.all([
-        operationsApi.snapshot(), operationsApi.backups(), operationsApi.readiness(), operationsApi.goldenJourneys(),
+      const [nextSnapshot, backupInventory, nextReadiness, nextJourneys] = await Promise.all([
+        operationsApi.snapshot(),
+        operationsApi.backups().catch(() => ({ items: [], configured: false })),
+        operationsApi.readiness(),
+        operationsApi.goldenJourneys(),
       ]);
       setSnapshot(nextSnapshot);
-      setBackups(nextBackups);
+      setBackups(backupInventory.items);
+      setBackupConfigured(backupInventory.configured);
       setReadiness(nextReadiness);
       setJourneys(nextJourneys.items || []);
       setJourneyResults(nextJourneys.last_results || nextReadiness.journeys || []);
@@ -132,7 +137,7 @@ export function OperationsRecoveryPanel() {
   return <section className="theme-card overflow-hidden rounded-2xl border border-slate-200 shadow-sm">
     <div className="flex flex-col justify-between gap-4 border-b border-slate-200 bg-slate-950 px-5 py-5 text-white md:flex-row md:items-center">
       <div><div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-emerald-300"><ShieldCheck size={15} /> Athena Operations</div><h3 className="mt-2 text-lg font-black">{t('operations.title')}</h3><p className="mt-1 max-w-3xl text-xs leading-5 text-slate-400">{t('operations.subtitle')}</p></div>
-      <div className="flex gap-2"><button type="button" onClick={() => void load()} className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-bold"><RefreshCw size={14} className={loading ? 'animate-spin' : ''} />{t('experience.refresh')}</button><button type="button" onClick={() => void createBackup()} disabled={busy !== '' || !snapshot?.recovery_managed} className="flex items-center gap-2 rounded-xl bg-emerald-500 px-3 py-2 text-xs font-black text-slate-950 disabled:opacity-40">{busy === 'create' ? <Loader2 size={14} className="animate-spin" /> : <DatabaseBackup size={14} />}{t('operations.createBackup')}</button></div>
+      <div className="flex gap-2"><button type="button" onClick={() => void load()} className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-bold"><RefreshCw size={14} className={loading ? 'animate-spin' : ''} />{t('experience.refresh')}</button><button type="button" onClick={() => void createBackup()} disabled={busy !== '' || !snapshot?.recovery_managed || !backupConfigured} className="flex items-center gap-2 rounded-xl bg-emerald-500 px-3 py-2 text-xs font-black text-slate-950 disabled:opacity-40">{busy === 'create' ? <Loader2 size={14} className="animate-spin" /> : <DatabaseBackup size={14} />}{t('operations.createBackup')}</button></div>
     </div>
 
     {error ? <div className="m-5 flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-xs text-red-700"><ShieldAlert size={17} className="shrink-0" /><div><strong>{t('operations.unavailable')}</strong><p className="mt-1 break-all text-red-600">{error}</p></div></div> : loading && !snapshot ? <div className="flex min-h-48 items-center justify-center"><Loader2 className="animate-spin text-emerald-600" /></div> : snapshot && <div className="p-5">
@@ -173,7 +178,7 @@ export function OperationsRecoveryPanel() {
 
         <div className="overflow-hidden rounded-2xl border border-slate-200">
           <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-3"><div><h4 className="text-xs font-black uppercase tracking-wider text-slate-700">{t('operations.recoveryPoints')}</h4><p className="mt-1 text-[10px] text-slate-400">{t('operations.recoveryHint')}</p></div><HardDrive size={18} className="text-slate-400" /></div>
-          <div className="max-h-[560px] divide-y divide-slate-100 overflow-y-auto">{backups.length === 0 ? <p className="p-5 text-xs text-slate-400">{t('operations.noBackups')}</p> : backups.map(backup => {
+          <div className="max-h-[560px] divide-y divide-slate-100 overflow-y-auto">{!backupConfigured ? <div className="flex items-start gap-2 bg-amber-50 p-4 text-[10px] leading-5 text-amber-800"><ShieldAlert size={15} className="mt-0.5 shrink-0" /><p>{t('operations.backupUnavailable')}</p></div> : backups.length === 0 ? <p className="p-5 text-xs text-slate-400">{t('operations.noBackups')}</p> : backups.map(backup => {
             const exact = `RESTORE ${backup.backup_id}`;
             const expanded = restoreTarget === backup.backup_id;
             return <article key={backup.backup_id} className="p-4">

@@ -41,6 +41,9 @@ export interface ExperienceRecord {
   status: ExperienceStatus;
   skip_reason?: string;
   goal_summary?: string;
+  task_type?: string;
+  domain?: string;
+  skill_refs?: string[];
   intent?: Record<string, unknown>;
   environment_fingerprint?: string;
   plan_summary?: string;
@@ -95,6 +98,10 @@ export interface ExperiencePreference {
 
 export interface ExperienceStats {
   total: number;
+  terminal_tasks: number;
+  covered_tasks: number;
+  pending_tasks: number;
+  coverage_rate: number;
   ready: number;
   skipped: number;
   deleted: number;
@@ -155,6 +162,10 @@ export interface EvaluationRun {
   candidate_id?: string;
   baseline_id?: string;
   metrics: EvaluationMetrics;
+  baseline_metrics: EvaluationMetrics;
+  metric_delta: EvaluationMetrics;
+  regression: boolean;
+  regression_count: number;
   started_at: string;
   finished_at?: string;
   error?: string;
@@ -166,6 +177,9 @@ export interface EvaluationResult {
   fixture_id: string;
   passed: boolean;
   metrics: EvaluationMetrics;
+  baseline_metrics: EvaluationMetrics;
+  metric_delta: EvaluationMetrics;
+  regression: boolean;
   summary: string;
   evidence_ids?: string[];
   created_at: string;
@@ -173,6 +187,29 @@ export interface EvaluationResult {
 
 export type LearningCandidateKind = 'SKILL' | 'STRATEGY';
 export type LearningLifecycle = 'DRAFT' | 'VALIDATING' | 'EVALUATING' | 'REVIEW_REQUIRED' | 'APPROVED_FOR_USE' | 'REJECTED' | 'DEPRECATED' | 'RETIRED';
+
+export interface LearningEvolutionStatus {
+  enabled: boolean;
+  running: boolean;
+  ai_synthesis_enabled: boolean;
+  ai_synthesis_model?: string;
+  scans: number;
+  owners_scanned: number;
+  patterns_discovered: number;
+  candidates_proposed: number;
+  candidates_skipped: number;
+  last_scan_at?: string;
+  last_completed_at?: string;
+  last_error?: string;
+}
+
+export interface LearningEvolutionScanResult {
+  owners_scanned: number;
+  patterns_discovered: number;
+  candidates_proposed: number;
+  candidates_skipped: number;
+  candidate_ids?: string[];
+}
 
 export interface DeclarativeSkill {
   id: string;
@@ -212,7 +249,7 @@ export interface DeclarativeStrategy {
 }
 
 export interface LearningCandidate {
-  schema: 'athena.learning.v1';
+  schema: 'athena.learning.v2';
   candidate_id: string;
   owner_id: string;
   kind: LearningCandidateKind;
@@ -274,6 +311,7 @@ export interface LearningCandidateEvaluation {
 export interface LearnedSkill {
   skill_id: string;
   owner_id: string;
+  organization_id?: string;
   latest_version: string;
   status: LearningLifecycle;
   visibility: 'PRIVATE' | 'TEAM' | 'PUBLIC';
@@ -283,8 +321,21 @@ export interface LearnedSkill {
   updated_at: string;
 }
 
+export interface LearnedStrategy {
+  strategy_id: string;
+  owner_id: string;
+  organization_id?: string;
+  latest_version: string;
+  status: LearningLifecycle;
+  visibility: 'PRIVATE' | 'TEAM' | 'PUBLIC';
+  definition: DeclarativeStrategy;
+  revision: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Demonstration {
-  schema: 'athena.learning.v1';
+  schema: 'athena.learning.v2';
   demonstration_id: string;
   owner_id: string;
   task_id: string;
@@ -293,6 +344,7 @@ export interface Demonstration {
   steps: Array<{ sequence: number; capability: string; operation: string; summary: string; redacted: boolean }>;
   pause_count: number;
   confirmed_by?: string;
+  confirmed_at?: string;
   revision: number;
   trace_id?: string;
   created_at: string;
@@ -481,6 +533,12 @@ export interface BackupManifest {
     key_id: string;
     value: string;
   };
+}
+
+export interface BackupInventory {
+  items: BackupManifest[];
+  configured: boolean;
+  reason?: string;
 }
 
 export type GAReadinessStatus = 'PASS' | 'FAIL' | 'BLOCKED' | 'EXTERNAL_REQUIRED' | 'NOT_RUN';
@@ -840,7 +898,7 @@ export interface OntologyPack {
   created_at: string;
 }
 
-export type GoalStatus = 'DRAFT' | 'PLANNED' | 'RUNNING' | 'WAITING_USER' | 'PAUSED' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
+export type GoalStatus = 'DRAFT' | 'PLANNED' | 'RUNNING' | 'WAITING_USER' | 'WAITING_DEVICE' | 'PAUSED' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
 export type GoalTaskStatus = 'PENDING' | 'READY' | 'RUNNING' | 'WAITING_USER' | 'WAITING_DEVICE' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
 
 export interface GoalBudget {
@@ -869,6 +927,12 @@ export interface GoalCriterion {
   evidence_ref?: string;
 }
 
+export interface GoalInput {
+  input_id: string;
+  content: string;
+  created_at: string;
+}
+
 export interface GoalTrigger {
   type: 'INTERACTIVE' | 'SCHEDULE';
   trigger_id?: string;
@@ -879,7 +943,7 @@ export interface GoalTrigger {
 }
 
 export interface PersistentGoal {
-  schema: 'athena.orchestration.v1';
+  schema: 'athena.orchestration.v2';
   goal_id: string;
   owner_id: string;
   agent_id: string;
@@ -887,6 +951,7 @@ export interface PersistentGoal {
   objective: string;
   constraints: string[];
   success_criteria: GoalCriterion[];
+  inputs?: GoalInput[];
   budget: GoalBudget;
   usage: GoalUsage;
   deadline?: string;
@@ -902,16 +967,20 @@ export interface PersistentGoal {
 
 export interface GoalTask {
   task_id: string;
+  task_key: string;
   goal_id: string;
   specialist: 'RESEARCH' | 'BROWSER' | 'DESKTOP' | 'FILE' | 'SYNTHESIS';
   objective: string;
   depends_on?: string[];
   required_capabilities?: string[];
   world_slice_refs?: string[];
+  requires_device: boolean;
+  preferred_device_id?: string;
   device_id?: string;
   execution_id?: string;
   idempotency_scope: string;
   budget: Omit<GoalBudget, 'max_concurrent_specialists' | 'max_depth'>;
+  usage: GoalUsage;
   status: GoalTaskStatus;
   attempt: number;
   depth: number;
@@ -928,9 +997,10 @@ export interface GoalCheckpoint {
   sequence: number;
   goal_revision: number;
   status: GoalStatus;
-  usage: GoalUsage;
-  confirmed_effect_keys?: string[];
-  pending_approval_ids?: string[];
+	usage: GoalUsage;
+	confirmed_effect_keys?: string[];
+	observation_refs?: string[];
+	pending_approval_ids?: string[];
   reason: string;
   previous_checksum?: string;
   checksum: string;
@@ -948,14 +1018,14 @@ export interface SpecialistResult {
   observation_refs?: string[];
   confirmed_effect_keys?: string[];
   usage: GoalUsage;
-  provenance: { run_manifest_id: string; agent_build_id: string; model_config_version: string; device_id?: string; trace_id: string; produced_at: string };
+  provenance: { producer_type: 'RUNTIME_RUN' | 'CONTROL_PLANE'; producer: string; producer_version: string; run_manifest_id?: string; agent_build_id?: string; model_config_version?: string; device_id?: string; trace_id: string; produced_at: string };
   created_at: string;
 }
 
 export type ScheduleTriggerStatus = 'QUEUED' | 'RUNNING' | 'WAITING_USER' | 'WAITING_DEVICE' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
 
 export interface ScheduleTrigger {
-  schema: 'athena.orchestration.v1';
+  schema: 'athena.orchestration.v2';
   trigger_id: string;
   schedule_id: string;
   owner_id: string;

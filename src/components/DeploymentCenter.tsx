@@ -18,9 +18,9 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
-import { agentApi, deploymentApi } from '../lib/api';
+import { agentApi, deploymentApi, learningApi } from '../lib/api';
 import { cn } from '../lib/utils';
-import type { Agent, AgentBuild, CanaryMetric, DeploymentExposure, DeploymentRollback, DeploymentStatus, Promotion, RunManifest, ShadowResult } from '../types';
+import type { Agent, AgentBuild, CanaryMetric, DeploymentExposure, DeploymentRollback, DeploymentStatus, LearnedSkill, LearnedStrategy, Promotion, RunManifest, ShadowResult } from '../types';
 import { PluginRegistryPanel } from './PluginRegistryPanel';
 import { OperationsRecoveryPanel } from './OperationsRecoveryPanel';
 import { DelegationLearningPanel } from './DelegationLearningPanel';
@@ -38,6 +38,18 @@ const statusTone: Record<DeploymentStatus, string> = {
 
 function agentID(agent: Agent) { return agent.ulid || agent.id; }
 
+type BuildArtifactOption = {
+  id: string;
+  version: string;
+  description: string;
+  visibility: 'PRIVATE' | 'TEAM' | 'PUBLIC';
+};
+
+function retainAvailableVersions(current: Record<string, string>, options: BuildArtifactOption[]) {
+  const available = new Map(options.map(item => [item.id, item.version]));
+  return Object.fromEntries(Object.entries(current).filter(([id, version]) => available.get(id) === version));
+}
+
 export function DeploymentCenter() {
   const { t } = useTranslation();
   const [agents, setAgents] = React.useState<Agent[]>([]);
@@ -45,6 +57,8 @@ export function DeploymentCenter() {
   const [promotions, setPromotions] = React.useState<Promotion[]>([]);
   const [manifests, setManifests] = React.useState<RunManifest[]>([]);
   const [rollbacks, setRollbacks] = React.useState<DeploymentRollback[]>([]);
+  const [skills, setSkills] = React.useState<BuildArtifactOption[]>([]);
+  const [strategies, setStrategies] = React.useState<BuildArtifactOption[]>([]);
   const [exposure, setExposure] = React.useState<DeploymentExposure | null>(null);
   const [shadow, setShadow] = React.useState<Record<string, ShadowResult[]>>({});
   const [metrics, setMetrics] = React.useState<Record<string, CanaryMetric[]>>({});
@@ -52,20 +66,35 @@ export function DeploymentCenter() {
   const [selectedAgent, setSelectedAgent] = React.useState('');
   const [version, setVersion] = React.useState('0.5.0');
   const [risk, setRisk] = React.useState<AgentBuild['risk_level']>('R1');
+  const [selectedSkills, setSelectedSkills] = React.useState<Record<string, string>>({});
+  const [selectedStrategies, setSelectedStrategies] = React.useState<Record<string, string>>({});
   const [busy, setBusy] = React.useState('');
   const [loading, setLoading] = React.useState(true);
 
   const load = React.useCallback(async () => {
     setLoading(true);
     try {
-      const [agentItems, buildItems, promotionItems, manifestItems, rollbackItems] = await Promise.all([
+      const [agentItems, buildItems, promotionItems, manifestItems, rollbackItems, skillItems, strategyItems] = await Promise.all([
         agentApi.findAll(), deploymentApi.builds(), deploymentApi.promotions(), deploymentApi.manifests(), deploymentApi.rollbacks(),
+        learningApi.skills(), learningApi.strategies(),
       ]);
+      const nextSkills = skillItems
+        .filter(item => item.status === 'APPROVED_FOR_USE')
+        .map((item: LearnedSkill) => ({ id: item.skill_id, version: item.latest_version, description: item.definition.description, visibility: item.visibility }))
+        .sort((left, right) => left.id.localeCompare(right.id));
+      const nextStrategies = strategyItems
+        .filter(item => item.status === 'APPROVED_FOR_USE')
+        .map((item: LearnedStrategy) => ({ id: item.strategy_id, version: item.latest_version, description: item.definition.description, visibility: item.visibility }))
+        .sort((left, right) => left.id.localeCompare(right.id));
       setAgents(agentItems);
       setBuilds(buildItems);
       setPromotions(promotionItems);
       setManifests(manifestItems);
       setRollbacks(rollbackItems);
+      setSkills(nextSkills);
+      setStrategies(nextStrategies);
+      setSelectedSkills(current => retainAvailableVersions(current, nextSkills));
+      setSelectedStrategies(current => retainAvailableVersions(current, nextStrategies));
       if (!selectedAgent && agentItems.length > 0) setSelectedAgent(agentID(agentItems[0]));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t('deployment.loadFailed'));
@@ -88,7 +117,14 @@ export function DeploymentCenter() {
     if (!selectedAgent) return;
     setBusy('build');
     try {
-      const build = await deploymentApi.createBuild({ agent_id: selectedAgent, version, risk_level: risk, prompt_template_versions: { system: `agent-${selectedAgent}-current` } });
+      const build = await deploymentApi.createBuild({
+        agent_id: selectedAgent,
+        version,
+        risk_level: risk,
+        prompt_template_versions: { system: `agent-${selectedAgent}-current` },
+        skill_versions: selectedSkills,
+        strategy_versions: selectedStrategies,
+      });
       setBuilds(current => [build, ...current]);
       toast.success(t('deployment.buildCreated'));
     } catch (error) {
@@ -206,13 +242,16 @@ export function DeploymentCenter() {
           <Field label={t('deployment.agent')}><select value={selectedAgent} onChange={event => setSelectedAgent(event.target.value)} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs outline-none focus:border-sky-400"><option value="">{t('deployment.selectAgent')}</option>{agents.map(agent => <option key={agentID(agent)} value={agentID(agent)}>{agent.name || agentID(agent)}</option>)}</select></Field>
           <Field label={t('deployment.version')}><input value={version} onChange={event => setVersion(event.target.value)} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 font-mono text-xs outline-none focus:border-sky-400" /></Field>
           <Field label={t('deployment.risk')}><select value={risk} onChange={event => setRisk(event.target.value as AgentBuild['risk_level'])} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs outline-none focus:border-sky-400"><option>R0</option><option>R1</option><option>R2</option><option>R3</option></select></Field>
+          <ArtifactPicker title={t('deployment.reviewedSkills')} empty={t('deployment.noReviewedSkills')} options={skills} selected={selectedSkills} onChange={setSelectedSkills} />
+          <ArtifactPicker title={t('deployment.reviewedStrategies')} empty={t('deployment.noReviewedStrategies')} options={strategies} selected={selectedStrategies} onChange={setSelectedStrategies} />
+          <p className="mt-3 text-[10px] leading-4 text-slate-500">{t('deployment.artifactSelection', { skills: Object.keys(selectedSkills).length, strategies: Object.keys(selectedStrategies).length })}</p>
           <button type="button" onClick={() => void createBuild()} disabled={!selectedAgent || !version || busy === 'build'} className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-3 text-xs font-bold text-white disabled:opacity-40">{busy === 'build' ? <Loader2 size={14} className="animate-spin" /> : <GitBranch size={14} />}{t('deployment.createBuild')}</button>
         </section>
         <section className="theme-card rounded-2xl border border-slate-200 p-5 shadow-sm">
           <div className="flex items-center justify-between gap-3"><div><h3 className="font-bold text-slate-900">{t('deployment.experiment')}</h3><p className="mt-1 text-xs leading-5 text-slate-500">{t('deployment.experimentHint')}</p></div><Power size={18} className="text-slate-400" /></div>
           {exposure ? <><div className="mt-4 grid grid-cols-2 gap-2"><Metric label={t('deployment.variant')} value={exposure.opted_out ? 'CONTROL' : exposure.variant} /><Metric label={t('deployment.bucket')} value={String(exposure.bucket)} /></div><button type="button" onClick={() => void toggleOptOut()} disabled={busy === 'experiment'} className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-bold text-slate-700 disabled:opacity-40">{busy === 'experiment' && <Loader2 size={13} className="animate-spin" />}{t(exposure.opted_out ? 'deployment.joinExperiment' : 'deployment.leaveExperiment')}</button></> : <p className="mt-4 rounded-xl bg-slate-50 p-3 text-xs text-slate-400">{t('deployment.noExperiment')}</p>}
         </section>
-        <section className="theme-card rounded-2xl border border-slate-200 p-5 shadow-sm"><div className="flex items-center justify-between"><h3 className="font-bold text-slate-900">{t('deployment.builds')}</h3><strong className="text-sm text-sky-600">{filteredBuilds.length}</strong></div><div className="mt-3 max-h-[480px] space-y-2 overflow-y-auto">{filteredBuilds.map(build => <div key={build.build_id} className="rounded-xl border border-slate-200 bg-slate-50 p-3"><div className="flex items-start justify-between gap-2"><div className="min-w-0"><strong className="block truncate font-mono text-xs text-slate-800">{build.version}</strong><span className="text-[9px] text-slate-400">{build.build_id}</span></div><span className="rounded bg-white px-2 py-1 text-[9px] font-black text-slate-600">{build.risk_level}</span></div><p className="mt-2 truncate font-mono text-[9px] text-slate-400">sha256:{build.checksum.slice(0, 16)}…</p><button type="button" onClick={() => void propose(build)} disabled={busy === `propose:${build.build_id}`} className="mt-3 w-full rounded-lg border border-sky-200 bg-white px-3 py-2 text-[10px] font-bold text-sky-700 disabled:opacity-40">{t('deployment.propose')}</button></div>)}{filteredBuilds.length === 0 && <p className="rounded-xl bg-slate-50 p-3 text-xs text-slate-400">{t('deployment.noBuilds')}</p>}</div></section>
+        <section className="theme-card rounded-2xl border border-slate-200 p-5 shadow-sm"><div className="flex items-center justify-between"><h3 className="font-bold text-slate-900">{t('deployment.builds')}</h3><strong className="text-sm text-sky-600">{filteredBuilds.length}</strong></div><div className="mt-3 max-h-[480px] space-y-2 overflow-y-auto">{filteredBuilds.map(build => <div key={build.build_id} className="rounded-xl border border-slate-200 bg-slate-50 p-3"><div className="flex items-start justify-between gap-2"><div className="min-w-0"><strong className="block truncate font-mono text-xs text-slate-800">{build.version}</strong><span className="text-[9px] text-slate-400">{build.build_id}</span></div><span className="rounded bg-white px-2 py-1 text-[9px] font-black text-slate-600">{build.risk_level}</span></div><p className="mt-2 text-[9px] text-slate-500">{t('deployment.artifactSummary', { skills: Object.keys(build.skill_versions || {}).length, strategies: Object.keys(build.strategy_versions || {}).length })}</p><p className="mt-1 truncate font-mono text-[9px] text-slate-400">sha256:{build.checksum.slice(0, 16)}…</p><button type="button" onClick={() => void propose(build)} disabled={busy === `propose:${build.build_id}`} className="mt-3 w-full rounded-lg border border-sky-200 bg-white px-3 py-2 text-[10px] font-bold text-sky-700 disabled:opacity-40">{t('deployment.propose')}</button></div>)}{filteredBuilds.length === 0 && <p className="rounded-xl bg-slate-50 p-3 text-xs text-slate-400">{t('deployment.noBuilds')}</p>}</div></section>
       </aside>
 
       <section className="theme-card overflow-hidden rounded-2xl border border-slate-200 shadow-sm">
@@ -245,6 +284,28 @@ export function DeploymentCenter() {
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) { return <label className="mt-3 block"><span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{label}</span><span className="mt-1.5 block">{children}</span></label>; }
+function ArtifactPicker({ title, empty, options, selected, onChange }: { title: string; empty: string; options: BuildArtifactOption[]; selected: Record<string, string>; onChange: React.Dispatch<React.SetStateAction<Record<string, string>>> }) {
+  const toggle = (option: BuildArtifactOption, checked: boolean) => onChange(current => {
+    if (checked) return { ...current, [option.id]: option.version };
+    const next = { ...current };
+    delete next[option.id];
+    return next;
+  });
+  return <fieldset className="mt-4">
+    <legend className="flex w-full items-center justify-between text-[10px] font-bold uppercase tracking-wider text-slate-400"><span>{title}</span><span>{Object.keys(selected).length}/{options.length}</span></legend>
+    <div className="mt-1.5 max-h-40 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50">
+      {options.map(option => {
+        const checked = selected[option.id] === option.version;
+        return <label key={`${option.id}:${option.version}`} className="flex cursor-pointer items-start gap-2 border-b border-slate-200 px-3 py-2.5 last:border-b-0 hover:bg-white">
+          <input type="checkbox" checked={checked} onChange={event => toggle(option, event.target.checked)} className="mt-0.5 h-4 w-4 shrink-0 accent-sky-600" />
+          <span className="min-w-0 flex-1"><strong className="block truncate font-mono text-[10px] text-slate-800">{option.id}</strong><span className="mt-0.5 block truncate text-[9px] text-slate-400">{option.description}</span></span>
+          <span className="shrink-0 text-right"><strong className="block font-mono text-[9px] text-sky-700">@{option.version}</strong><span className="text-[8px] font-bold text-slate-400">{option.visibility}</span></span>
+        </label>;
+      })}
+      {options.length === 0 && <p className="px-3 py-3 text-[10px] leading-4 text-slate-400">{empty}</p>}
+    </div>
+  </fieldset>;
+}
 function Status({ value }: { value: DeploymentStatus }) { return <span className={cn('rounded-full border px-2.5 py-1 text-[9px] font-black tracking-wider', statusTone[value])}>{value.replaceAll('_', ' ')}</span>; }
 function Metric({ label, value, good }: { label: string; value: string; good?: boolean }) { return <div className="rounded-xl border border-slate-200 bg-white p-3"><p className="text-[9px] font-black uppercase tracking-wider text-slate-400">{label}</p><p className={cn('mt-1 truncate font-mono text-sm font-black', good ? 'text-emerald-600' : 'text-slate-800')}>{value}</p></div>; }
 function Action({ icon: Icon, label, onClick, disabled, danger }: { icon: React.ComponentType<{ size?: number }>; label: string; onClick: () => void; disabled?: boolean; danger?: boolean }) { return <button type="button" onClick={onClick} disabled={disabled} className={cn('flex items-center gap-1.5 rounded-lg border bg-white px-3 py-2 text-[10px] font-bold disabled:opacity-40', danger ? 'border-red-200 text-red-600' : 'border-slate-200 text-slate-700')}><Icon size={12} />{label}</button>; }

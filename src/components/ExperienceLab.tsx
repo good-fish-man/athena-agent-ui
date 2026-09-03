@@ -47,8 +47,14 @@ import type {
 
 type WorkspaceTab = 'experience' | 'evaluation' | 'learning' | 'deployment';
 
+const experiencePageSize = 50;
+
 const defaultStats: ExperienceStats = {
   total: 0,
+  terminal_tasks: 0,
+  covered_tasks: 0,
+  pending_tasks: 0,
+  coverage_rate: 0,
   ready: 0,
   skipped: 0,
   deleted: 0,
@@ -80,6 +86,9 @@ function Badge({ value }: { value?: string }) {
 }
 
 function formatDuration(value: number) {
+	// Go time.Duration subtraction saturates at this millisecond range when a
+	// legacy observation is missing one endpoint. Treat that sentinel as unknown.
+	if (!Number.isFinite(value) || value < 0 || value >= 9_000_000_000_000) return '—';
   if (value < 1000) return `${value} ms`;
   if (value < 60_000) return `${(value / 1000).toFixed(1)} s`;
   return `${(value / 60_000).toFixed(1)} min`;
@@ -229,7 +238,7 @@ export function ExperienceLab() {
       const [nextPreference, nextStats, list, nextFixtures, nextSuites, nextRuns] = await Promise.all([
         experienceApi.preference(),
         experienceApi.stats(),
-        experienceApi.list({ query: deferredQuery.trim(), status, outcome, sensitivity, limit: 50 }),
+        experienceApi.list({ query: deferredQuery.trim(), status, outcome, sensitivity, limit: experiencePageSize }),
         experienceApi.fixtures(),
         experienceApi.suites(),
         experienceApi.runs(),
@@ -249,6 +258,26 @@ export function ExperienceLab() {
   }, [deferredQuery, outcome, sensitivity, status, t]);
 
   React.useEffect(() => { void load(); }, [load]);
+
+  const loadMoreExperiences = async () => {
+    if (loading || busy === 'experience:more' || items.length >= total) return;
+    setBusy('experience:more');
+    try {
+      const page = await experienceApi.list({
+        query: deferredQuery.trim(), status, outcome, sensitivity,
+        limit: experiencePageSize, offset: items.length,
+      });
+      setItems(current => {
+        const known = new Set(current.map(item => item.experience_id));
+        return current.concat((page.items || []).filter(item => !known.has(item.experience_id)));
+      });
+      setTotal(page.total || 0);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t('experience.loadFailed'));
+    } finally {
+      setBusy('');
+    }
+  };
 
   const savePreference = async () => {
     if (!preference) return;
@@ -346,7 +375,7 @@ export function ExperienceLab() {
   const runSuite = async (suite: EvaluationSuite) => {
     setBusy(`run:${suite.suite_id}`);
     try {
-      const response = await experienceApi.runSuite(suite.suite_id, { seed: 42, candidate_id: 'v0.3-candidate', baseline_id: 'v0.2-baseline' });
+      const response = await experienceApi.runSuite(suite.suite_id, { seed: 42, candidate_id: 'current-runtime', baseline_id: 'fixture-recorded-observation' });
       setRuns(current => [response.run, ...current.filter(run => run.run_id !== response.run.run_id)]);
       setResults(current => ({ ...current, [response.run.run_id]: response.results }));
       toast.success(t('experience.runCompleted'));
@@ -406,8 +435,9 @@ export function ExperienceLab() {
       </header>
 
       <main className="mx-auto max-w-7xl space-y-6 p-5 lg:p-8">
-        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
           <StatCard icon={DatabaseZap} label={t('experience.total')} value={stats.total} accent="text-sky-600 bg-sky-50" />
+          <StatCard icon={Gauge} label={t('experience.coverage')} value={`${Math.round(stats.coverage_rate * 100)}%`} accent="text-cyan-600 bg-cyan-50" />
           <StatCard icon={CheckCircle2} label={t('experience.ready')} value={stats.ready} accent="text-emerald-600 bg-emerald-50" />
           <StatCard icon={Eraser} label={t('experience.redactions')} value={stats.redactions} accent="text-amber-600 bg-amber-50" />
           <StatCard icon={Beaker} label={t('experience.evalRuns')} value={stats.evaluation_runs} accent="text-indigo-600 bg-indigo-50" />
@@ -522,6 +552,17 @@ export function ExperienceLab() {
                   ))}
                 </div>
               )}
+              {!loading && items.length > 0 && (
+                <div className="flex flex-col items-center justify-between gap-3 border-t border-slate-200 bg-slate-50/70 px-5 py-4 sm:flex-row">
+                  <span className="text-[10px] font-bold text-slate-500">{t('experience.showingRecords', { shown: items.length, total })}</span>
+                  {items.length < total && (
+                    <button type="button" onClick={() => void loadMoreExperiences()} disabled={busy === 'experience:more'} className="flex min-w-36 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-bold text-slate-700 hover:border-brand-300 disabled:opacity-50">
+                      {busy === 'experience:more' ? <Loader2 size={14} className="animate-spin" /> : <ChevronDown size={14} />}
+                      {t('experience.loadMore')}
+                    </button>
+                  )}
+                </div>
+              )}
             </section>
           </>
         ) : tab === 'evaluation' ? (
@@ -541,7 +582,7 @@ export function ExperienceLab() {
             onShowResults={showResults}
           />
         ) : tab === 'learning' ? (
-          <LearningStudio experiences={items} />
+          <LearningStudio onExperiencesChanged={load} />
         ) : (
           <DeploymentCenter />
         )}
@@ -658,6 +699,9 @@ function EvaluationWorkspace(props: EvaluationWorkspaceProps) {
                     <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600">{props.busy === `results:${run.run_id}` ? <Loader2 size={16} className="animate-spin" /> : <Beaker size={16} />}</span>
                     <span className="min-w-0 flex-1"><span className="block truncate font-mono text-[10px] font-bold text-slate-700">{run.run_id}</span><span className="mt-1 block text-[10px] text-slate-400">seed {run.seed} · {formatDate(run.started_at)}</span></span>
                     <span className="hidden gap-3 text-right sm:flex"><RunMetric label={t('experience.correctness')} value={run.metrics.correctness} /><RunMetric label={t('experience.safety')} value={run.metrics.safety_score} /></span>
+                    <span className={cn('rounded-full border px-2.5 py-1 text-[10px] font-bold', run.regression ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700')}>
+                      {run.regression ? t('experience.regressionCount', { count: run.regression_count }) : t('experience.noRegression')}
+                    </span>
                     <Badge value={run.status} />
                     {props.expanded === run.run_id ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
                   </button>
@@ -666,7 +710,13 @@ function EvaluationWorkspace(props: EvaluationWorkspaceProps) {
                       {(props.results[run.run_id] || []).map(result => (
                         <div key={result.result_id} className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white p-3">
                           {result.passed ? <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-emerald-500" /> : <XCircle size={16} className="mt-0.5 shrink-0 text-red-500" />}
-                          <div className="min-w-0 flex-1"><p className="text-xs font-bold text-slate-800">{result.summary}</p><p className="mt-1 truncate font-mono text-[9px] text-slate-400">{result.fixture_id}</p></div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-bold text-slate-800">{result.summary}</p>
+                            <p className="mt-1 truncate font-mono text-[9px] text-slate-400">{result.fixture_id}</p>
+                            <p className={cn('mt-1 text-[10px] font-bold', result.regression ? 'text-red-600' : 'text-emerald-600')}>
+                              {t('experience.candidateDelta', { correctness: formatSignedPercent(result.metric_delta.correctness), safety: formatSignedPercent(result.metric_delta.safety_score) })}
+                            </p>
+                          </div>
                           <span className="text-xs font-black text-slate-700">{Math.round(result.metrics.correctness * 100)}%</span>
                         </div>
                       ))}
@@ -684,4 +734,9 @@ function EvaluationWorkspace(props: EvaluationWorkspaceProps) {
 
 function RunMetric({ label, value }: { label: string; value: number }) {
   return <span><span className="block text-[8px] font-bold uppercase tracking-wider text-slate-400">{label}</span><span className="text-xs font-black text-slate-800">{Math.round(value * 100)}%</span></span>;
+}
+
+function formatSignedPercent(value: number) {
+  const percent = Math.round(value * 100);
+  return `${percent > 0 ? '+' : ''}${percent}%`;
 }

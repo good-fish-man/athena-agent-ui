@@ -22,7 +22,9 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
-import { learningApi } from '../lib/api';
+import { experienceApi, learningApi } from '../lib/api';
+import { authStore } from '../lib/auth';
+import { analyzeLearningEvidence, learningActionPattern, MAX_LEARNING_EVIDENCE } from '../lib/learningEvidence';
 import { cn } from '../lib/utils';
 import type {
   Demonstration,
@@ -31,6 +33,7 @@ import type {
   LearningCandidate,
   LearningCandidateEvidence,
   LearningCandidateEvaluation,
+  LearningEvolutionStatus,
 } from '../types';
 
 type LearningView = 'candidates' | 'demonstrations';
@@ -52,17 +55,25 @@ function LifecycleBadge({ value }: { value: string }) {
 
 function percent(value: number) { return `${Math.round(value * 100)}%`; }
 
-export function LearningStudio({ experiences }: { experiences: ExperienceRecord[] }) {
+export function LearningStudio({
+  onExperiencesChanged,
+}: {
+  onExperiencesChanged?: () => void | Promise<void>;
+}) {
   const { t } = useTranslation();
+	const organizationID = authStore.user()?.organization_id?.trim() || '';
   const [view, setView] = React.useState<LearningView>('candidates');
   const [candidates, setCandidates] = React.useState<LearningCandidate[]>([]);
   const [skills, setSkills] = React.useState<LearnedSkill[]>([]);
   const [demonstrations, setDemonstrations] = React.useState<Demonstration[]>([]);
+  const [evidencePool, setEvidencePool] = React.useState<ExperienceRecord[]>([]);
+  const [evolution, setEvolution] = React.useState<LearningEvolutionStatus | null>(null);
   const [details, setDetails] = React.useState<Record<string, { evidence: LearningCandidateEvidence[]; evaluations: LearningCandidateEvaluation[] }>>({});
   const [expanded, setExpanded] = React.useState('');
   const [selectedExperienceIDs, setSelectedExperienceIDs] = React.useState<string[]>([]);
   const [candidateID, setCandidateID] = React.useState('');
   const [candidateDescription, setCandidateDescription] = React.useState('');
+  const [candidateVisibility, setCandidateVisibility] = React.useState<'PRIVATE' | 'TEAM' | 'PUBLIC'>('PRIVATE');
   const [taskID, setTaskID] = React.useState('');
   const [demonstrationTitle, setDemonstrationTitle] = React.useState('');
   const [reviewNotes, setReviewNotes] = React.useState<Record<string, string>>({});
@@ -71,17 +82,32 @@ export function LearningStudio({ experiences }: { experiences: ExperienceRecord[
   const [loading, setLoading] = React.useState(true);
   const [busy, setBusy] = React.useState('');
 
-  const eligible = React.useMemo(() => experiences.filter(item => item.status === 'READY').slice(0, 20), [experiences]);
+  const eligible = React.useMemo(() => evidencePool.filter(item => item.status === 'READY'), [evidencePool]);
+  const selectedExperiences = React.useMemo(() => {
+    const selected = new Set(selectedExperienceIDs);
+    return eligible.filter(item => selected.has(item.experience_id));
+  }, [eligible, selectedExperienceIDs]);
+  const evidenceGate = React.useMemo(() => analyzeLearningEvidence(selectedExperiences), [selectedExperiences]);
+  const suggestedEvidence = React.useMemo(() => analyzeLearningEvidence(eligible), [eligible]);
 
   const load = React.useCallback(async () => {
     setLoading(true);
     try {
-      const [candidatePage, nextSkills, nextDemonstrations] = await Promise.all([
-        learningApi.candidates(), learningApi.skills(), learningApi.demonstrations(),
+      const [candidatePage, nextSkills, nextDemonstrations, nextEvolution, evidencePage] = await Promise.all([
+        learningApi.candidates(), learningApi.skills(), learningApi.demonstrations(), learningApi.evolutionStatus(),
+        experienceApi.list({ status: 'READY', limit: 200 }),
       ]);
+      const nextEvidence = evidencePage.items || [];
       setCandidates(candidatePage.items || []);
       setSkills(nextSkills);
       setDemonstrations(nextDemonstrations);
+      setEvolution(nextEvolution);
+      setEvidencePool(nextEvidence);
+      setSelectedExperienceIDs(current => {
+        const available = new Set(nextEvidence.map(item => item.experience_id));
+        const retained = current.filter(id => available.has(id)).slice(0, MAX_LEARNING_EVIDENCE);
+        return retained.length > 0 ? retained : analyzeLearningEvidence(nextEvidence).experienceIDs;
+      });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t('learning.loadFailed'));
     } finally {
@@ -90,29 +116,58 @@ export function LearningStudio({ experiences }: { experiences: ExperienceRecord[
   }, [t]);
 
   React.useEffect(() => { void load(); }, [load]);
-  React.useEffect(() => {
-    if (selectedExperienceIDs.length === 0 && eligible.length >= 4) {
-      setSelectedExperienceIDs(eligible.map(item => item.experience_id));
+	React.useEffect(() => {
+		if (!organizationID && candidateVisibility === 'TEAM') setCandidateVisibility('PRIVATE');
+	}, [candidateVisibility, organizationID]);
+
+  const scanEvolution = async () => {
+    setBusy('evolution:scan');
+    try {
+      const result = await learningApi.scanEvolution();
+      await load();
+      toast.success(t('learning.evolutionScanCompleted', { count: result.candidates_proposed }));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t('learning.evolutionScanFailed'));
+    } finally {
+      setBusy('');
     }
-  }, [eligible, selectedExperienceIDs.length]);
+  };
 
   const generate = async () => {
+    if (!evidenceGate.ready) {
+      toast.error(t(`learning.evidenceGateReasons.${evidenceGate.reason}`));
+      return;
+    }
     setBusy('generate');
     try {
       const candidate = await learningApi.generate({
         kind: 'SKILL', id: candidateID.trim() || undefined, description: candidateDescription.trim() || undefined,
-        experience_ids: selectedExperienceIDs, minimum_score: 0.75,
+        experience_ids: evidenceGate.experienceIDs, visibility: candidateVisibility, minimum_score: 0.75,
       });
       setCandidates(current => [candidate, ...current]);
       setCandidateID('');
       setCandidateDescription('');
       setExpanded(candidate.candidate_id);
+      try {
+        const value = await learningApi.candidate(candidate.candidate_id);
+        setDetails(current => ({ ...current, [candidate.candidate_id]: { evidence: value.evidence, evaluations: value.evaluations } }));
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : t('learning.loadFailed'));
+      }
       toast.success(t('learning.generated'));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t('learning.generateFailed'));
     } finally {
       setBusy('');
     }
+  };
+
+  const toggleEvidence = (experienceID: string) => {
+    setSelectedExperienceIDs(current => {
+      if (current.includes(experienceID)) return current.filter(id => id !== experienceID);
+      if (current.length >= MAX_LEARNING_EVIDENCE) return current;
+      return [...current, experienceID];
+    });
   };
 
   const openCandidate = async (candidate: LearningCandidate) => {
@@ -134,10 +189,15 @@ export function LearningStudio({ experiences }: { experiences: ExperienceRecord[
   };
 
   const review = async (candidate: LearningCandidate, decision: 'APPROVE' | 'REJECT') => {
+    const note = (reviewNotes[candidate.candidate_id] || '').trim();
+    if (!note) {
+      toast.error(t('learning.reviewNoteRequired'));
+      return;
+    }
     setBusy(`review:${candidate.candidate_id}`);
     try {
       const reviewed = await learningApi.review(candidate.candidate_id, {
-        decision, note: reviewNotes[candidate.candidate_id] || '', expected_revision: candidate.revision,
+        decision, note, expected_revision: candidate.revision,
       });
       setCandidates(current => current.map(item => item.candidate_id === reviewed.candidate_id ? reviewed : item));
       if (decision === 'APPROVE') setSkills(await learningApi.skills());
@@ -215,6 +275,10 @@ export function LearningStudio({ experiences }: { experiences: ExperienceRecord[
           : action === 'confirm' ? await learningApi.confirmDemonstration(item.demonstration_id)
             : await learningApi.discardDemonstration(item.demonstration_id);
       setDemonstrations(current => current.map(value => value.demonstration_id === next.demonstration_id ? next : value));
+      if (action === 'confirm') {
+        await onExperiencesChanged?.();
+        await load();
+      }
       toast.success(t(`learning.demonstrationActions.${action}Done`));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t('learning.demonstrationFailed'));
@@ -237,9 +301,21 @@ export function LearningStudio({ experiences }: { experiences: ExperienceRecord[
             <button type="button" onClick={() => setView('demonstrations')} className={cn('rounded-lg px-4 py-2 text-xs font-bold', view === 'demonstrations' ? 'bg-white text-slate-950' : 'text-slate-300')}><GraduationCap className="mr-2 inline" size={14} />{t('learning.demonstrations')}</button>
           </div>
         </div>
-        <div className="flex items-center justify-between border-b border-slate-200 bg-emerald-50 px-5 py-3 text-xs text-emerald-800">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-emerald-50 px-5 py-3 text-xs text-emerald-800">
           <span className="flex items-center gap-2"><LockKeyhole size={15} />{t('learning.noAutoActivation')}</span>
-          <button type="button" onClick={() => void load()} className="flex items-center gap-1.5 font-bold"><RefreshCw size={13} className={loading ? 'animate-spin' : ''} />{t('experience.refresh')}</button>
+          <div className="flex flex-wrap items-center gap-3">
+            <span className={cn('flex items-center gap-1.5 font-bold', evolution?.ai_synthesis_enabled ? 'text-indigo-700' : 'text-slate-500')}>
+              <Sparkles size={13} />
+              {evolution?.ai_synthesis_enabled
+                ? t('learning.codexEnabled', { model: evolution.ai_synthesis_model || 'Codex' })
+                : t('learning.codexDisabled')}
+            </span>
+            <button type="button" onClick={() => void scanEvolution()} disabled={!evolution?.enabled || busy === 'evolution:scan'} className="flex items-center gap-1.5 font-bold disabled:opacity-40">
+              {busy === 'evolution:scan' ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+              {t('learning.scanEvolution')}
+            </button>
+            <button type="button" onClick={() => void load()} className="flex items-center gap-1.5 font-bold"><RefreshCw size={13} className={loading ? 'animate-spin' : ''} />{t('experience.refresh')}</button>
+          </div>
         </div>
       </section>
 
@@ -253,18 +329,31 @@ export function LearningStudio({ experiences }: { experiences: ExperienceRecord[
               <input value={candidateID} onChange={event => setCandidateID(event.target.value)} placeholder="browser.open.reviewed" className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 font-mono text-xs outline-none focus:border-emerald-400" />
               <label className="mt-3 block text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">{t('learning.description')}</label>
               <textarea value={candidateDescription} onChange={event => setCandidateDescription(event.target.value)} rows={3} className="mt-1.5 w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs outline-none focus:border-emerald-400" />
-              <div className="mt-4 flex items-center justify-between"><span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">{t('learning.evidenceSelection')}</span><span className="text-[10px] text-slate-400">{selectedExperienceIDs.length}/20</span></div>
+              <label className="mt-3 block text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">{t('learning.visibility')}</label>
+              <select value={candidateVisibility} onChange={event => setCandidateVisibility(event.target.value as 'PRIVATE' | 'TEAM' | 'PUBLIC')} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs outline-none focus:border-emerald-400">
+                <option value="PRIVATE">{t('learning.visibilityPrivate')}</option>
+                <option value="TEAM" disabled={!organizationID}>{t('learning.visibilityTeam')}</option>
+                <option value="PUBLIC">{t('learning.visibilityPublic')}</option>
+              </select>
+				{candidateVisibility === 'TEAM' && organizationID && <p className="mt-1.5 text-[10px] text-slate-500">{t('learning.organizationScope', { id: organizationID })}</p>}
+				{!organizationID && <p className="mt-1.5 text-[10px] text-amber-600">{t('learning.organizationRequired')}</p>}
+              <div className="mt-4 flex items-center justify-between gap-3"><span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">{t('learning.evidenceSelection')}</span><span className="text-right text-[10px] text-slate-400">{t('learning.evidenceSelected', { count: selectedExperienceIDs.length, max: MAX_LEARNING_EVIDENCE, available: eligible.length })}</span></div>
               <div className="mt-2 max-h-52 space-y-1.5 overflow-y-auto pr-1">
                 {eligible.map(item => {
                   const checked = selectedExperienceIDs.includes(item.experience_id);
-                  return <button key={item.experience_id} type="button" onClick={() => setSelectedExperienceIDs(current => checked ? current.filter(id => id !== item.experience_id) : [...current, item.experience_id])} className={cn('flex w-full items-start gap-2 rounded-xl border p-2.5 text-left', checked ? 'border-emerald-300 bg-emerald-50' : 'border-slate-200 bg-slate-50')}>
+                  const disabled = !checked && selectedExperienceIDs.length >= MAX_LEARNING_EVIDENCE;
+                  return <button key={item.experience_id} type="button" onClick={() => toggleEvidence(item.experience_id)} disabled={disabled} className={cn('flex w-full items-start gap-2 rounded-xl border p-2.5 text-left disabled:cursor-not-allowed disabled:opacity-45', checked ? 'border-emerald-300 bg-emerald-50' : 'border-slate-200 bg-slate-50')}>
                     <span className={cn('mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border', checked ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-slate-300')}>{checked && <Check size={11} />}</span>
-                    <span className="min-w-0"><strong className="block truncate text-[11px] text-slate-700">{item.goal_summary || item.task_id}</strong><span className={cn('text-[9px] font-bold', item.outcome === 'SUCCEEDED' ? 'text-emerald-600' : 'text-red-500')}>{item.outcome}</span></span>
+                    <span className="min-w-0"><strong className="block truncate text-[11px] text-slate-700">{item.goal_summary || item.task_id}</strong><span className={cn('text-[9px] font-bold', item.outcome === 'SUCCEEDED' ? 'text-emerald-600' : 'text-red-500')}>{item.outcome}</span><span className="ml-2 text-[9px] text-slate-400">{learningActionPattern(item) || t('learning.noActionPattern')}</span></span>
                   </button>;
                 })}
+                {eligible.length === 0 && <p className="rounded-xl border border-dashed border-slate-200 p-3 text-xs text-slate-400">{t('learning.noEligibleEvidence')}</p>}
               </div>
-              <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-[10px] leading-5 text-amber-800"><ShieldAlert className="mr-1.5 inline" size={13} />{t('learning.evidenceGate')}</div>
-              <button type="button" onClick={() => void generate()} disabled={busy === 'generate' || selectedExperienceIDs.length < 4} className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-3 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-40">
+              <div className={cn('mt-3 rounded-xl border p-3 text-[10px] leading-5', evidenceGate.ready ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-800')}>
+                <div className="flex items-start gap-2">{evidenceGate.ready ? <Check className="mt-0.5 shrink-0" size={13} /> : <ShieldAlert className="mt-0.5 shrink-0" size={13} />}<div className="min-w-0"><strong>{t(`learning.evidenceGateReasons.${evidenceGate.reason}`)}</strong><p>{t('learning.evidenceCounts', { successes: evidenceGate.successCount, failures: evidenceGate.failureCount, matching: evidenceGate.matchingCount })}</p>{evidenceGate.pattern && <p className="truncate font-mono text-[9px]" title={evidenceGate.pattern}>{t('learning.evidencePattern', { pattern: evidenceGate.pattern })}</p>}</div></div>
+                {!evidenceGate.ready && suggestedEvidence.ready && <button type="button" onClick={() => setSelectedExperienceIDs(suggestedEvidence.experienceIDs)} className="mt-2 flex items-center gap-1.5 font-bold text-emerald-700"><Check size={12} />{t('learning.useSuggestedEvidence')}</button>}
+              </div>
+              <button type="button" onClick={() => void generate()} disabled={busy === 'generate' || !evidenceGate.ready} className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-3 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-40">
                 {busy === 'generate' ? <Loader2 size={15} className="animate-spin" /> : <FlaskConical size={15} />}{t('learning.validateAndPropose')}
               </button>
             </section>
@@ -285,7 +374,7 @@ export function LearningStudio({ experiences }: { experiences: ExperienceRecord[
                 return <article key={candidate.candidate_id}>
                   <button type="button" onClick={() => void openCandidate(candidate)} className="flex w-full items-start gap-3 px-5 py-4 text-left hover:bg-slate-50">
                     <span className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-400">{isExpanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}</span>
-                    <span className="min-w-0 flex-1"><span className="flex flex-wrap items-center gap-2"><strong className="font-mono text-sm text-slate-900">{artifact?.id || candidate.candidate_id}</strong><span className="rounded bg-sky-100 px-2 py-0.5 text-[9px] font-black text-sky-700">{candidate.kind}</span><LifecycleBadge value={candidate.status} /></span><span className="mt-1 block text-xs text-slate-500">{artifact?.description}</span></span>
+                    <span className="min-w-0 flex-1"><span className="flex flex-wrap items-center gap-2"><strong className="font-mono text-sm text-slate-900">{artifact?.id || candidate.candidate_id}</strong><span className="rounded bg-sky-100 px-2 py-0.5 text-[9px] font-black text-sky-700">{candidate.kind}</span>{candidate.skill?.metadata?.synthesizer === 'codex' && <span className="rounded bg-indigo-100 px-2 py-0.5 text-[9px] font-black text-indigo-700">CODEX</span>}<LifecycleBadge value={candidate.status} /></span><span className="mt-1 block text-xs text-slate-500">{artifact?.description}</span></span>
                     <span className="hidden text-right sm:block"><strong className="block text-sm text-slate-800">{percent(candidate.evaluation.success_rate)}</strong><span className="text-[9px] uppercase tracking-wider text-slate-400">{t('learning.offlineScore')}</span></span>
                   </button>
                   {isExpanded && <div className="border-t border-slate-200 bg-slate-50/70 p-5">
@@ -299,14 +388,14 @@ export function LearningStudio({ experiences }: { experiences: ExperienceRecord[
                       <ReviewMetric label={t('learning.failureConditions')} value={String(new Set(candidate.evidence.contexts.map(item => item.failure_condition).filter(Boolean)).size)} />
                       <ReviewMetric label={t('learning.riskCeiling')} value={artifact?.risk_ceiling || '—'} />
                       {candidate.reviewed_by && <ReviewMetric label={t('learning.reviewedBy')} value={candidate.reviewed_by} />}
-                      {candidate.reviewed_at && <ReviewMetric label={t('learning.reviewedAt')} value={new Date(candidate.reviewed_at).toLocaleString()} />}
+                      {candidate.reviewed_by && candidate.reviewed_at && <ReviewMetric label={t('learning.reviewedAt')} value={new Date(candidate.reviewed_at).toLocaleString()} />}
                     </div>
                     <div className="mt-3 flex flex-wrap gap-2">{candidate.evidence.contexts.map(context => <span key={context.experience_id} className={cn('rounded-full border px-2.5 py-1 font-mono text-[9px]', context.outcome === 'FAILED' ? 'border-red-200 bg-red-50 text-red-700' : 'border-sky-200 bg-sky-50 text-sky-700')}>{context.environment_fingerprint} · {context.site_scope}{context.failure_condition ? ` · ${context.failure_condition}` : ''}</span>)}</div>
                     <div className="mt-4 grid gap-4 lg:grid-cols-2">
                       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white"><div className="flex items-center gap-2 border-b border-slate-200 px-3 py-2 text-[10px] font-black uppercase tracking-wider text-slate-500"><GitCompareArrows size={13} />{t('learning.behaviorDiff')}</div><div className="grid grid-cols-2 divide-x divide-slate-200"><div className="p-3"><span className="text-[9px] font-bold text-red-500">− {t('learning.before')}</span><p className="mt-2 text-[10px] leading-5 text-slate-400">{t('learning.noInstalledBehavior')}</p></div><div className="p-3"><span className="text-[9px] font-bold text-emerald-600">+ {t('learning.afterApproval')}</span><pre className="mt-2 max-h-52 overflow-auto whitespace-pre-wrap break-all font-mono text-[9px] leading-4 text-slate-600">{JSON.stringify(artifact, null, 2)}</pre></div></div></div>
                       <div className="rounded-xl border border-slate-200 bg-white p-3"><div className="flex items-center justify-between"><span className="text-[10px] font-black uppercase tracking-wider text-slate-500">{t('learning.evidenceTrail')}</span>{busy === `detail:${candidate.candidate_id}` && <Loader2 size={13} className="animate-spin" />}</div><div className="mt-2 max-h-52 space-y-2 overflow-y-auto">{(detail?.evidence || []).map(item => <div key={item.evidence_id} className={cn('rounded-lg border p-2.5', item.relation === 'FAILURE_COUNTEREXAMPLE' ? 'border-red-100 bg-red-50' : 'border-emerald-100 bg-emerald-50')}><div className="flex items-center justify-between gap-2"><strong className="text-[10px] text-slate-700">{item.relation.replaceAll('_', ' ')}</strong><span className="font-mono text-[9px] text-slate-400">{item.experience_id}</span></div><p className="mt-1 text-[10px] text-slate-600">{item.summary}</p></div>)}{!detail && <p className="text-xs text-slate-400">{t('learning.loadingEvidence')}</p>}</div></div>
                     </div>
-                    {candidate.status === 'REVIEW_REQUIRED' && <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
+                    {['REVIEW_REQUIRED', 'EVALUATING'].includes(candidate.status) && <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <label className="text-[10px] font-black uppercase tracking-wider text-amber-700">{t('learning.reviewNote')}</label>
                         <div className="flex flex-wrap gap-2">
@@ -319,8 +408,11 @@ export function LearningStudio({ experiences }: { experiences: ExperienceRecord[
                         <textarea value={candidateDrafts[candidate.candidate_id] || ''} onChange={event => setCandidateDrafts(current => ({ ...current, [candidate.candidate_id]: event.target.value }))} rows={14} spellCheck={false} className="w-full resize-y rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 font-mono text-[10px] leading-5 text-emerald-200 outline-none" />
                         <div className="mt-2 flex justify-end gap-2"><button type="button" onClick={() => setEditingCandidate('')} className="rounded-lg border border-slate-600 px-3 py-2 text-[10px] font-bold text-slate-300">{t('common.cancel')}</button><button type="button" onClick={() => void saveCandidate(candidate)} disabled={busy === `edit:${candidate.candidate_id}`} className="flex items-center gap-1.5 rounded-lg bg-emerald-500 px-3 py-2 text-[10px] font-bold text-slate-950 disabled:opacity-40">{busy === `edit:${candidate.candidate_id}` ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}{t('common.save')}</button></div>
                       </div>}
-                      <textarea value={reviewNotes[candidate.candidate_id] || ''} onChange={event => setReviewNotes(current => ({ ...current, [candidate.candidate_id]: event.target.value }))} rows={2} className="mt-2 w-full resize-none rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs outline-none" />
-                      <div className="mt-3 flex flex-wrap justify-end gap-2"><button type="button" onClick={() => void review(candidate, 'REJECT')} disabled={busy === `review:${candidate.candidate_id}`} className="flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-bold text-red-600"><X size={13} />{t('learning.reject')}</button><button type="button" onClick={() => void review(candidate, 'APPROVE')} disabled={!candidate.evaluation.passed || busy === `review:${candidate.candidate_id}`} className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-40">{busy === `review:${candidate.candidate_id}` ? <Loader2 size={13} className="animate-spin" /> : <BookOpenCheck size={13} />}{t('learning.approve')}</button></div>
+                      {candidate.status === 'EVALUATING' && <p className="mt-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-[10px] font-semibold text-sky-700">{t('learning.evaluationRequiredAfterEdit')}</p>}
+                      {candidate.status === 'REVIEW_REQUIRED' && <>
+                        <textarea value={reviewNotes[candidate.candidate_id] || ''} onChange={event => setReviewNotes(current => ({ ...current, [candidate.candidate_id]: event.target.value }))} rows={2} required placeholder={t('learning.reviewNoteRequired')} className="mt-2 w-full resize-none rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs outline-none" />
+                        <div className="mt-3 flex flex-wrap justify-end gap-2"><button type="button" onClick={() => void review(candidate, 'REJECT')} disabled={!reviewNotes[candidate.candidate_id]?.trim() || busy === `review:${candidate.candidate_id}`} className="flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-bold text-red-600 disabled:opacity-40"><X size={13} />{t('learning.reject')}</button><button type="button" onClick={() => void review(candidate, 'APPROVE')} disabled={!candidate.evaluation.passed || !reviewNotes[candidate.candidate_id]?.trim() || busy === `review:${candidate.candidate_id}`} className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-40">{busy === `review:${candidate.candidate_id}` ? <Loader2 size={13} className="animate-spin" /> : <BookOpenCheck size={13} />}{t('learning.approve')}</button></div>
+                      </>}
                     </div>}
                   </div>}
                 </article>;

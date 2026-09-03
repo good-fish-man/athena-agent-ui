@@ -1,8 +1,8 @@
 import React from 'react';
-import { Settings as SettingsIcon, Save, RotateCcw, FileCode, Info, FileJson, Loader2, Power, CheckCircle2, AlertTriangle, Palette, Check } from 'lucide-react';
+import { Settings as SettingsIcon, Save, RotateCcw, FileCode, Info, FileJson, Loader2, Power, CheckCircle2, AlertTriangle, Palette, Check, Monitor, RefreshCw, Link, Unplug, Wifi, WifiOff } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '../lib/utils';
-import { configApi } from '../lib/api';
+import { configApi, controlApi, type ControlDevice } from '../lib/api';
 import {
   currentThemeBackground,
   currentThemeCard,
@@ -149,6 +149,10 @@ export function Settings() {
   const [themeColor, setThemeColor] = React.useState(currentThemeColor);
   const [themeBackground, setThemeBackground] = React.useState(currentThemeBackground);
   const [themeCard, setThemeCard] = React.useState(currentThemeCard);
+  const [devices, setDevices] = React.useState<ControlDevice[]>([]);
+  const [devicesLoading, setDevicesLoading] = React.useState(true);
+  const [deviceActionID, setDeviceActionID] = React.useState('');
+  const [deviceError, setDeviceError] = React.useState('');
 
   const updateThemeColor = (color: string) => {
     setThemeColor(saveThemeColor(color));
@@ -165,7 +169,49 @@ export function Settings() {
   // Load configs on mount
   React.useEffect(() => {
     loadConfigs();
+    void loadDevices();
   }, []);
+
+  const loadDevices = async () => {
+    setDevicesLoading(true);
+    setDeviceError('');
+    try {
+      setDevices(await controlApi.devices());
+    } catch (e: any) {
+      setDeviceError(e.message || t('settings.devicesLoadFailed'));
+    } finally {
+      setDevicesLoading(false);
+    }
+  };
+
+  const bindDevice = async (device: ControlDevice) => {
+    setDeviceActionID(device.id);
+    setDeviceError('');
+    try {
+      await controlApi.bindDevice(device.id);
+      await loadDevices();
+      setServiceMessage(t('settings.deviceBound', { name: device.name || device.id }));
+    } catch (e: any) {
+      setDeviceError(e.message || t('settings.deviceActionFailed'));
+    } finally {
+      setDeviceActionID('');
+    }
+  };
+
+  const unbindDevice = async (device: ControlDevice) => {
+    if (!window.confirm(t('settings.confirmDeviceUnbind', { name: device.name || device.id }))) return;
+    setDeviceActionID(device.id);
+    setDeviceError('');
+    try {
+      await controlApi.unbindDevice(device.id);
+      await loadDevices();
+      setServiceMessage(t('settings.deviceUnbound', { name: device.name || device.id }));
+    } catch (e: any) {
+      setDeviceError(e.message || t('settings.deviceActionFailed'));
+    } finally {
+      setDeviceActionID('');
+    }
+  };
 
   const loadConfigs = async () => {
     setIsLoading(true);
@@ -467,6 +513,76 @@ export function Settings() {
 
         {/* Info Panel */}
         <div className="scrollbar-hide" style={{ width: '320px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: '24px', overflowY: 'auto', paddingRight: '2px' }}>
+          <div className="theme-card" style={{ borderRadius: '16px', border: '1px solid var(--theme-card-border)', padding: '20px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Monitor size={18} color="var(--color-brand-500)" />
+                <h2 style={{ fontWeight: 'bold', color: '#0f172a' }}>{t('settings.devicesTitle')}</h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => void loadDevices()}
+                disabled={devicesLoading || Boolean(deviceActionID)}
+                title={t('settings.refreshDevices')}
+                aria-label={t('settings.refreshDevices')}
+                style={{ display: 'flex', width: '32px', height: '32px', alignItems: 'center', justifyContent: 'center', border: '1px solid #e2e8f0', borderRadius: '8px', backgroundColor: 'white', color: '#64748b', cursor: devicesLoading ? 'not-allowed' : 'pointer' }}
+              >
+                <RefreshCw size={14} className={devicesLoading ? 'animate-spin' : undefined} />
+              </button>
+            </div>
+            <p style={{ marginTop: '6px', fontSize: '11px', lineHeight: 1.6, color: '#64748b' }}>
+              {t('settings.devicesDescription')}
+            </p>
+
+            {deviceError && (
+              <div style={{ marginTop: '12px', padding: '9px 10px', borderRadius: '8px', border: '1px solid #fecaca', backgroundColor: '#fef2f2', color: '#b91c1c', fontSize: '10px', lineHeight: 1.5 }}>
+                {deviceError}
+              </div>
+            )}
+
+            <div style={{ marginTop: '14px' }}>
+              {devicesLoading && devices.length === 0 ? (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '72px', color: '#94a3b8' }}>
+                  <Loader2 size={18} className="animate-spin" />
+                </div>
+              ) : devices.length === 0 ? (
+                <div style={{ padding: '18px 0', textAlign: 'center', color: '#94a3b8', fontSize: '11px' }}>{t('settings.noDevices')}</div>
+              ) : devices.map((device, index) => {
+                const bound = Boolean(device.user_id);
+                const busy = deviceActionID === device.id;
+                return (
+                  <div key={device.id} style={{ padding: '12px 0', borderTop: index === 0 ? 'none' : '1px solid #e2e8f0' }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '10px' }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#0f172a', fontSize: '12px', fontWeight: 'bold' }}>{device.name || device.id}</div>
+                        <div title={device.id} style={{ marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#94a3b8', fontFamily: 'monospace', fontSize: '9px' }}>{device.id}</div>
+                      </div>
+                      <span style={{ display: 'inline-flex', flexShrink: 0, alignItems: 'center', gap: '4px', color: device.online ? '#15803d' : '#64748b', fontSize: '9px', fontWeight: 'bold' }}>
+                        {device.online ? <Wifi size={11} /> : <WifiOff size={11} />}
+                        {device.online ? t('settings.deviceOnline') : t('settings.deviceOffline')}
+                      </span>
+                    </div>
+                    <div style={{ marginTop: '10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
+                      <span style={{ color: bound ? '#475569' : '#94a3b8', fontSize: '10px' }}>
+                        {bound ? t('settings.deviceBoundToYou') : t('settings.deviceUnboundState')}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={busy || (!bound && !device.online)}
+                        onClick={() => void (bound ? unbindDevice(device) : bindDevice(device))}
+                        title={bound ? t('settings.unbindDevice') : t('settings.bindDevice')}
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', minHeight: '28px', padding: '5px 9px', borderRadius: '7px', border: `1px solid ${bound ? '#fecaca' : '#bbf7d0'}`, backgroundColor: bound ? '#fff7f7' : '#f0fdf4', color: bound ? '#b91c1c' : '#15803d', cursor: busy || (!bound && !device.online) ? 'not-allowed' : 'pointer', opacity: busy || (!bound && !device.online) ? 0.55 : 1, fontSize: '10px', fontWeight: 'bold' }}
+                      >
+                        {busy ? <Loader2 size={12} className="animate-spin" /> : bound ? <Unplug size={12} /> : <Link size={12} />}
+                        {bound ? t('settings.unbindDevice') : t('settings.bindDevice')}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
           <div className="theme-card" style={{ borderRadius: '16px', border: '1px solid var(--theme-card-border)', padding: '20px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>

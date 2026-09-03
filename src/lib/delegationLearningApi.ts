@@ -112,7 +112,17 @@ const jsonRequest = (body: unknown): RequestInit => ({
 });
 
 export const delegationLearningApi = {
-  snapshot: () => request<DelegationLearningSnapshot>('/delegation-learning'),
+  snapshot: async () => {
+    const value = await request<DelegationLearningSnapshot>('/delegation-learning');
+    return {
+      ...value,
+      candidates: Array.isArray(value.candidates) ? value.candidates : [],
+      evaluations: Array.isArray(value.evaluations) ? value.evaluations : [],
+      reviews: Array.isArray(value.reviews) ? value.reviews : [],
+      rollouts: Array.isArray(value.rollouts) ? value.rollouts : [],
+      benchmarks: Array.isArray(value.benchmarks) ? value.benchmarks : [],
+    };
+  },
   preference: (enabled: boolean, expectedRevision: number) => request<DelegationLearningPreference>('/delegation-learning/preference', {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled, expected_revision: expectedRevision }),
   }),
