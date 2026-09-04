@@ -159,6 +159,7 @@ const resources = {
         skills: 'Skills',
         knowledge: 'Knowledge Base',
         experience: 'Experience Lab',
+        world: 'World Model',
         models: 'Models',
         settings: 'Settings',
         logout: 'Sign out',
@@ -179,8 +180,12 @@ const resources = {
         skillsDesc: 'Capabilities and tools',
         knowledgeDesc: 'Knowledge sources',
         experienceDesc: 'Learning and offline evaluation',
+        worldDesc: 'State, conflicts, and ontology review',
         websiteAccounts: 'Website Accounts',
         websiteAccountsDesc: 'Secure sign-in vault'
+      },
+      world: {
+        eyebrow:'Athena world authority', title:'World Model', subtitle:'Inspect immutable state snapshots, resolve identity ambiguity, and govern ontology changes before production.', explorer:'World Explorer', providers:'Providers', conflictInbox:'Conflict Inbox', ontologyStudio:'Ontology Studio', ontologyReview:'Ontology Review', refresh:'Refresh', loadFailed:'Failed to load world model', taskId:'Task ID', allTasks:'All task scopes', search:'Search', searchPlaceholder:'Entity, relation, fact, or value', query:'Query', revision:'Revision', ontology:'Ontology', snapshot:'Snapshot', entities:'Entities', relations:'Relations', facts:'Facts', id:'ID', type:'Type', name:'Name', confidence:'Confidence', expires:'Expires', predicate:'Predicate', source:'Source', target:'Target', subject:'Subject', value:'Value', noConflicts:'No open entity resolution conflicts', matches:'Matching entity IDs', resolution:'Resolution note', resolve:'Resolve', conflictResolved:'Conflict resolved', resolveFailed:'Failed to resolve conflict', noCandidates:'No ontology candidates', proposedBy:'Proposed by', offlineEvaluation:'Offline evaluation', evidence:'evidence references', reviewNote:'Required review note', reject:'Reject candidate', approve:'Approve candidate', approved:'Ontology candidate approved', rejected:'Ontology candidate rejected', reviewFailed:'Failed to review candidate', addProvider:'Add provider', editProvider:'Edit provider', saveProvider:'Save provider', providerUpdated:'Provider updated', cancel:'Cancel', edit:'Edit', providerRegistry:'Provider registry', providerQuery:'Preview query', providerName:'Name', providerKind:'Protocol', endpoint:'Endpoint', database:'Database', readOnlyQuery:'Read-only projection query', authMode:'Authentication', credentialEnv:'Credential environment variable', ttl:'TTL (seconds)', timeout:'Timeout (ms)', allowPrivate:'Allow private network endpoint', connectProvider:'Add provider', providerCreated:'Provider created', providerFailed:'Provider operation failed', providerAvailable:'Provider is available', previewLoaded:'Read-only preview loaded', noProviders:'No external providers configured', disabled:'Disabled', test:'Test connection', preview:'Preview', disable:'Disable', enable:'Enable', delete:'Delete', deleteProviderConfirm:'Delete this provider configuration?', providerPreview:'External provider preview · not authoritative', createPack:'Create ontology pack', packName:'Pack name', domain:'Domain', planCandidate:'Plan candidate version', pack:'Ontology pack', newVersion:'New semantic version', definitionJson:'Ontology definition JSON', rulesJson:'Validation rules JSON', evidenceSelection:'Supporting evidence', submitReview:'Submit for offline evaluation', packCreated:'Ontology pack created', candidateCreated:'Ontology candidate created', ontologyPlanFailed:'Ontology plan was rejected'
       },
       experience: {
         title: 'Experience & Evaluation',
@@ -1212,6 +1217,7 @@ const resources = {
         skills: '技能',
         knowledge: '知识库',
         experience: '经验实验室',
+        world: '世界模型',
         models: '模型',
         settings: '设置',
         logout: '退出登录',
@@ -1232,8 +1238,12 @@ const resources = {
         skillsDesc: '能力、技能与工具',
         knowledgeDesc: '管理知识数据源',
         experienceDesc: '学习记录与离线评测',
+        worldDesc: '状态、冲突与本体审核',
         websiteAccounts: '网站账号',
         websiteAccountsDesc: '安全登录凭据库'
+      },
+      world: {
+        eyebrow:'Athena 世界状态权威层', title:'世界模型', subtitle:'查看不可变状态快照，处理实体身份歧义，并在进入生产环境前审核本体变更。', explorer:'世界浏览器', providers:'外部提供方', conflictInbox:'冲突收件箱', ontologyStudio:'本体规划', ontologyReview:'本体审核', refresh:'刷新', loadFailed:'加载世界模型失败', taskId:'任务 ID', allTasks:'全部任务范围', search:'搜索', searchPlaceholder:'实体、关系、事实或值', query:'查询', revision:'修订号', ontology:'本体', snapshot:'快照', entities:'实体', relations:'关系', facts:'事实', id:'ID', type:'类型', name:'名称', confidence:'置信度', expires:'失效时间', predicate:'谓词', source:'来源实体', target:'目标实体', subject:'主体', value:'值', noConflicts:'没有待处理的实体解析冲突', matches:'匹配的实体 ID', resolution:'处理说明', resolve:'解决', conflictResolved:'冲突已解决', resolveFailed:'解决冲突失败', noCandidates:'没有本体候选', proposedBy:'提议者', offlineEvaluation:'离线评测', evidence:'条证据引用', reviewNote:'必填审核说明', reject:'拒绝候选', approve:'批准候选', approved:'本体候选已批准', rejected:'本体候选已拒绝', reviewFailed:'审核候选失败', addProvider:'添加提供方', editProvider:'编辑提供方', saveProvider:'保存提供方', providerUpdated:'提供方已更新', cancel:'取消', edit:'编辑', providerRegistry:'提供方注册表', providerQuery:'预览查询', providerName:'名称', providerKind:'协议', endpoint:'服务端点', database:'数据库', readOnlyQuery:'只读投影查询', authMode:'认证方式', credentialEnv:'凭据环境变量', ttl:'TTL（秒）', timeout:'超时（毫秒）', allowPrivate:'允许访问私网端点', connectProvider:'添加提供方', providerCreated:'提供方已创建', providerFailed:'提供方操作失败', providerAvailable:'提供方连接正常', previewLoaded:'只读预览已加载', noProviders:'尚未配置外部提供方', disabled:'已停用', test:'测试连接', preview:'预览', disable:'停用', enable:'启用', delete:'删除', deleteProviderConfirm:'确定删除这个提供方配置吗？', providerPreview:'外部提供方预览 · 非权威状态', createPack:'创建本体包', packName:'本体包名称', domain:'领域', planCandidate:'规划候选版本', pack:'本体包', newVersion:'新语义版本', definitionJson:'本体定义 JSON', rulesJson:'验证规则 JSON', evidenceSelection:'支持证据', submitReview:'提交离线评测', packCreated:'本体包已创建', candidateCreated:'本体候选已创建', ontologyPlanFailed:'本体规划未通过校验'
       },
       experience: {
         title: '经验与评测',

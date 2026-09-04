@@ -35,6 +35,13 @@ import type {
   KnowledgeRetrievalResponse,
   KnowledgeSnapshot,
   OntologyPack,
+	OntologyCandidate,
+	OntologyContext,
+	WorldConflict,
+	WorldProvider,
+	WorldProviderQueryResult,
+	WorldProviderRequest,
+	WorldSnapshot,
 	PersistentGoal,
 	GoalState,
 	GoalCheckpoint,
@@ -57,7 +64,7 @@ import {
   type TaskEvent,
   type TaskSession,
   type WorldState,
-} from '../generated/athena-protocol-v4';
+} from '../generated/athena-protocol-v5';
 import i18n from '../i18n';
 import {
   MODEL_RUNTIME_MODE,
@@ -118,6 +125,9 @@ export interface RuntimeCapability {
   output?: string;
   read_only: boolean;
   risk: 'low' | 'medium' | 'high' | string;
+  preconditions: Array<{ path: string; operator: string; value?: unknown; required: boolean }>;
+  expected_effects: Array<{ operation: string; path: string; value?: unknown }>;
+  postconditions: Array<{ path: string; operator: string; value?: unknown; required: boolean }>;
   status: 'available' | 'unavailable';
   provider?: string;
   reason?: string;
@@ -370,6 +380,52 @@ export const evidenceKnowledgeApi = {
   async ontologyPacks(): Promise<OntologyPack[]> {
     const value = await readJson<{ items: OntologyPack[] }>(await apiFetch(`${API_BASE}/knowledge/ontology/packs`));
     return value.items || [];
+  },
+  async createOntologyPack(request: { name: string; domain: string; display?: Record<string, string> }): Promise<OntologyPack> {
+    return readJson<OntologyPack>(await apiFetch(`${API_BASE}/knowledge/ontology/packs`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(request) }));
+  },
+  async createOntologyCandidate(request: { pack_id: string; base_version: string; version: string; compatible_with?: string[]; validation_rules: Array<{subject_type:string;predicate:string;value_type:string;required:boolean}>; definition: {entities:Array<{id:string}>;relations:Array<{id:string;source_type:string;target_type:string}>}; evidence_refs: string[] }): Promise<OntologyCandidate> {
+    return readJson<OntologyCandidate>(await apiFetch(`${API_BASE}/knowledge/ontology/candidates`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(request) }));
+  },
+  async ontologyCandidates(limit = 100): Promise<OntologyCandidate[]> {
+    const value = await readJson<{ items: OntologyCandidate[] }>(await apiFetch(`${API_BASE}/knowledge/ontology/candidates?limit=${limit}`));
+    return value.items || [];
+  },
+  async reviewOntologyCandidate(candidate: OntologyCandidate, approved: boolean, reviewNote: string): Promise<OntologyCandidate> {
+    return readJson<OntologyCandidate>(await apiFetch(`${API_BASE}/knowledge/ontology/candidates/${encodeURIComponent(candidate.candidate_id)}/review`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({approved, review_note:reviewNote, expected_revision:candidate.revision}) }));
+  },
+};
+
+export const worldModelApi = {
+  async query(request: { task_id?: string; text?: string; include_expired?: boolean; limit?: number }): Promise<WorldSnapshot> {
+    return readJson<WorldSnapshot>(await apiFetch(`${API_BASE}/world/query`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({schema:'athena.world-query.v1', task_id:request.task_id || undefined, text:request.text || undefined, include_expired:Boolean(request.include_expired), as_of:new Date().toISOString(), limit:request.limit || 200}) }));
+  },
+  async conflicts(status = 'OPEN'): Promise<WorldConflict[]> {
+    const value=await readJson<{items:WorldConflict[]}>(await apiFetch(`${API_BASE}/world/conflicts?status=${encodeURIComponent(status)}&limit=200`)); return value.items || [];
+  },
+  async resolveConflict(conflict: WorldConflict, resolution: string): Promise<WorldConflict> {
+    return readJson<WorldConflict>(await apiFetch(`${API_BASE}/world/conflicts/${encodeURIComponent(conflict.conflict_id)}/resolve`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({resolution,expected_revision:conflict.revision})}));
+  },
+  async ontologyContext(): Promise<OntologyContext> {
+    return readJson<OntologyContext>(await apiFetch(`${API_BASE}/world/ontology-context`));
+  },
+  async providers(): Promise<WorldProvider[]> {
+    const value=await readJson<{items:WorldProvider[]}>(await apiFetch(`${API_BASE}/world/providers`)); return value.items || [];
+  },
+  async createProvider(request: WorldProviderRequest): Promise<WorldProvider> {
+    return readJson<WorldProvider>(await apiFetch(`${API_BASE}/world/providers`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(request)}));
+  },
+  async updateProvider(provider: WorldProvider, request: WorldProviderRequest): Promise<WorldProvider> {
+    return readJson<WorldProvider>(await apiFetch(`${API_BASE}/world/providers/${encodeURIComponent(provider.provider_id)}`, {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({...request,expected_revision:provider.revision})}));
+  },
+  async deleteProvider(providerID: string): Promise<void> {
+    const response=await apiFetch(`${API_BASE}/world/providers/${encodeURIComponent(providerID)}`, {method:'DELETE'}); if(!response.ok) await readJson(response);
+  },
+  async testProvider(providerID: string): Promise<WorldProvider> {
+    return readJson<WorldProvider>(await apiFetch(`${API_BASE}/world/providers/${encodeURIComponent(providerID)}/test`, {method:'POST'}));
+  },
+  async queryProvider(providerID: string, text = ''): Promise<WorldProviderQueryResult> {
+    return readJson<WorldProviderQueryResult>(await apiFetch(`${API_BASE}/world/providers/${encodeURIComponent(providerID)}/query`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({schema:'athena.world-query.v1',text:text||undefined,as_of:new Date().toISOString(),limit:100})}));
   },
 };
 

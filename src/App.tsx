@@ -19,6 +19,7 @@ import { CommandCenter } from './components/CommandCenter';
 import { ProjectWorkspace } from './components/ProjectWorkspace';
 import { WebsiteAccounts } from './components/WebsiteAccounts';
 import { ExperienceLab } from './components/ExperienceLab';
+import { WorldModelCenter } from './components/WorldModelCenter';
 import { View, Agent } from './types';
 import { AnimatePresence, motion } from 'motion/react';
 import { Toaster } from 'sonner';
@@ -124,6 +125,8 @@ export default function App() {
         return <Inbox onViewChange={setActiveView} />;
       case 'experience':
         return <ExperienceLab />;
+      case 'world':
+        return <WorldModelCenter />;
       default:
         return <Dashboard onViewChange={setActiveView} />;
     }

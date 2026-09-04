@@ -1,7 +1,7 @@
 import type { ModelRuntimeMode } from './lib/runtimeConstants';
-import type { Observation as ProtocolObservation } from './generated/athena-protocol-v4';
+import type { Observation as ProtocolObservation } from './generated/athena-protocol-v5';
 
-export type View = 'dashboard' | 'orchestrator' | 'agents' | 'skills' | 'knowledge' | 'models' | 'media' | 'chat' | 'workspace' | 'website-accounts' | 'settings' | 'inbox' | 'experience';
+export type View = 'dashboard' | 'orchestrator' | 'agents' | 'skills' | 'knowledge' | 'models' | 'media' | 'chat' | 'workspace' | 'website-accounts' | 'settings' | 'inbox' | 'experience' | 'world';
 
 export type ExperienceStatus = 'READY' | 'SKIPPED' | 'DELETED';
 export type ExperienceOutcome = 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
@@ -896,6 +896,39 @@ export interface OntologyPack {
   current_version?: string;
   display?: Record<string, string>;
   created_at: string;
+}
+
+export interface OntologyDefinition {
+  entities: Array<{ id: string; display?: Record<string, string> }>;
+  relations: Array<{ id: string; source_type: string; target_type: string; display?: Record<string, string> }>;
+}
+
+export interface OntologyValidationRule { subject_type: string; predicate: string; value_type: string; required: boolean }
+export interface OntologyContext { pack_id: string; version: string; checksum: string; definition: OntologyDefinition; validation_rules: OntologyValidationRule[] }
+
+export interface WorldEvidenceRef { evidence_id: string; kind: string; uri?: string; summary?: string }
+export interface WorldEntity { entity_id: string; scope: string; type: string; canonical_name?: string; aliases?: string[]; properties?: Record<string, unknown>; evidence?: WorldEvidenceRef[]; confidence: number; observed_at: string; expires_at: string; revision: number }
+export interface WorldRelation { relation_id: string; scope: string; source_id: string; target_id: string; predicate: string; properties?: Record<string, unknown>; evidence?: WorldEvidenceRef[]; confidence: number; observed_at: string; expires_at: string; revision: number }
+export interface WorldFact { fact_id: string; scope: string; subject_id: string; subject_type: string; predicate: string; value: unknown; value_type: string; properties?: Record<string, unknown>; evidence?: WorldEvidenceRef[]; confidence: number; observed_at: string; expires_at: string; revision: number }
+export interface WorldSnapshot { schema: 'athena.world-snapshot.v1'; snapshot_id: string; task_id: string; revision: number; ontology_pack: string; ontology_version: string; ontology_checksum: string; entities: WorldEntity[]; relations: WorldRelation[]; facts: WorldFact[]; captured_at: string; checksum: string }
+export interface WorldConflict { conflict_id: string; owner_id: string; task_id: string; observation_id: string; kind: string; subject: string; candidate_ids?: string[]; details?: Record<string, unknown>; status: 'OPEN' | 'RESOLVED' | 'DISMISSED'; resolution?: string; revision: number; created_at: string; updated_at: string }
+
+export type WorldProviderKind = 'ATHENA_HTTP' | 'SPARQL' | 'NEO4J' | 'TYPEDB';
+export type WorldProviderAuth = 'NONE' | 'BEARER' | 'BASIC';
+export interface WorldProvider {
+  provider_id: string; name: string; kind: WorldProviderKind; endpoint: string; database?: string; query_template?: string;
+  auth_mode: WorldProviderAuth; credential_env?: string; allow_private_network: boolean; ontology_pack: string; ontology_version: string;
+  default_confidence: number; ttl_seconds: number; timeout_ms: number; enabled: boolean; read_only: true; capabilities: string[];
+  health_status: 'UNKNOWN' | 'AVAILABLE' | 'FAILED'; health_message?: string; last_checked_at?: string; revision: number; created_at: string; updated_at: string;
+}
+export type WorldProviderRequest = Omit<WorldProvider, 'provider_id' | 'read_only' | 'capabilities' | 'health_status' | 'health_message' | 'last_checked_at' | 'revision' | 'created_at' | 'updated_at'> & { expected_revision?: number };
+export interface WorldProviderQueryResult { provider_id: string; provider_kind: WorldProviderKind; authoritative: false; snapshot: WorldSnapshot; warnings?: string[] }
+
+export interface OntologyCandidate {
+  candidate_id: string; pack_id: string; base_version: string; created_by: string; status: string; review_note?: string; revision: number; created_at: string;
+  evidence_refs: string[];
+  proposed: { version: string; checksum: string; definition: OntologyDefinition; validation_rules: OntologyValidationRule[] };
+  evaluation: { passed: boolean; environment: string; evaluator: string; checks: Array<{ name: string; required: boolean; passed: boolean; detail?: string }> };
 }
 
 export type GoalStatus = 'DRAFT' | 'PLANNED' | 'RUNNING' | 'WAITING_USER' | 'WAITING_DEVICE' | 'PAUSED' | 'COMPLETED' | 'FAILED' | 'CANCELLED';

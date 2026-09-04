@@ -17,7 +17,8 @@ import {
   WandSparkles,
   Loader2,
   KeyRound,
-  BrainCircuit
+  BrainCircuit,
+  Network
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { View } from '../types';
@@ -106,6 +107,7 @@ export function Sidebar({ activeView, onViewChange, user, onUserChange, onLogout
         { id: 'models', label: t('sidebar.models'), description: t('sidebar.modelsDesc'), icon: Cpu },
         { id: 'skills', label: t('sidebar.skills'), description: t('sidebar.skillsDesc'), icon: Zap },
         { id: 'knowledge', label: t('sidebar.knowledge'), description: t('sidebar.knowledgeDesc'), icon: Database },
+        { id: 'world', label: t('sidebar.world'), description: t('sidebar.worldDesc'), icon: Network },
         { id: 'website-accounts', label: t('sidebar.websiteAccounts'), description: t('sidebar.websiteAccountsDesc'), icon: KeyRound },
       ],
     },

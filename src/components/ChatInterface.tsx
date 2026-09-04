@@ -81,7 +81,7 @@ import { desktopPermissions } from '../lib/desktopPermissions';
 import { formatAssistantOutput } from '../lib/outputFormatting';
 import ResearchSourcesPanel from './ResearchSourcesPanel';
 import BrowserExecutionPanel, { hasBrowserExecution } from './BrowserExecutionPanel';
-import { ATHENA_PROTOCOL, type ObservationStatus } from '../generated/athena-protocol-v4';
+import { ATHENA_PROTOCOL, type ObservationStatus } from '../generated/athena-protocol-v5';
 import ControlTaskTimeline from './ControlTaskTimeline';
 
 // 辅助函数：检测并提取 Markdown 中的 HTML 代码块

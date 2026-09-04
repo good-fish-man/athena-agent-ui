@@ -6,8 +6,8 @@ const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const protocolRoot = process.env.ATHENA_PROTOCOL_ROOT
   ? resolve(process.env.ATHENA_PROTOCOL_ROOT)
   : resolve(projectRoot, '../../athena-protocol');
-const sourcePath = resolve(protocolRoot, 'typescript/athena-protocol-v4.ts');
-const targetPath = resolve(projectRoot, 'src/generated/athena-protocol-v4.ts');
+const sourcePath = resolve(protocolRoot, 'typescript/athena-protocol-v5.ts');
+const targetPath = resolve(projectRoot, 'src/generated/athena-protocol-v5.ts');
 const source = await readFile(sourcePath, 'utf8');
 
 if (process.argv.includes('--check')) {
@@ -18,5 +18,5 @@ if (process.argv.includes('--check')) {
   }
 } else {
   await writeFile(targetPath, source, 'utf8');
-  console.log(`Synced Athena Protocol v4 types from ${sourcePath}`);
+  console.log(`Synced Athena Protocol v5 types from ${sourcePath}`);
 }
