@@ -41,6 +41,13 @@ import { Agent, Message, Variable } from '../types';
 import PromptAssistant from './PromptAssistant';
 
 const DEFAULT_RUNNER_ENDPOINT = import.meta.env.VITE_AGENT_RUNTIME_RUN_ENDPOINT || 'http://localhost:18080/run';
+const GPT56_MODEL_PATTERN = /^gpt-5\.6(?:-|$)/i;
+const REASONING_EFFORTS = ['none', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+type ReasoningEffort = typeof REASONING_EFFORTS[number];
+
+const isGPT56Model = (name: string) => GPT56_MODEL_PATTERN.test(name.trim());
+const isReasoningEffort = (value: unknown): value is ReasoningEffort =>
+  typeof value === 'string' && REASONING_EFFORTS.includes(value as ReasoningEffort);
 
 interface AgentOrchestratorProps {
   editingAgent?: Agent | null;
@@ -124,6 +131,7 @@ export function AgentOrchestrator({ editingAgent, onSaved }: AgentOrchestratorPr
     imageModel: '',
     videoModel: '',
     temperature: 0.7,
+    reasoningEffort: 'medium' as ReasoningEffort,
     maxTokens: 2048,
     topK: 3,
     rerank: false,
@@ -267,6 +275,7 @@ export function AgentOrchestrator({ editingAgent, onSaved }: AgentOrchestratorPr
         imageModel: parsedConfig.imageModel || editingAgent.image_model || '',
         videoModel: parsedConfig.videoModel || editingAgent.video_model || '',
         temperature: parsedConfig.temperature ?? prev.temperature,
+        reasoningEffort: isReasoningEffort(parsedConfig.reasoningEffort) ? parsedConfig.reasoningEffort : prev.reasoningEffort,
         maxTokens: parsedConfig.maxTokens ?? prev.maxTokens,
         topK: parsedConfig.topK ?? prev.topK,
         rerank: parsedConfig.rerank ?? prev.rerank,
@@ -302,6 +311,10 @@ export function AgentOrchestrator({ editingAgent, onSaved }: AgentOrchestratorPr
   });
 
   const AGENT_ICONS = ['Bot', 'User', 'Sparkles', 'Brain', 'Zap', 'Workflow', 'MessageSquare', 'Globe', 'Terminal', 'Code'];
+  const selectedDefaultModelProfile = backendModels.find(model =>
+    (model.ulid || model.id) === agentConfig.models.default
+  );
+  const isGPT56DefaultModel = isGPT56Model(selectedDefaultModelProfile?.name || '');
 
   const handleDeployAsAgent = () => {
     setDeployForm({
@@ -343,13 +356,17 @@ export function AgentOrchestrator({ editingAgent, onSaved }: AgentOrchestratorPr
           const modelId = resolvedModels[type];
           const model = backendModels.find(m => m.ulid === modelId || m.id === modelId);
           if (model) {
+            const extraFields: Record<string, unknown> = {
+              model_id: model.ulid || model.id,
+            };
+            if (isGPT56Model(model.name || '')) {
+              extraFields.reasoning_effort = agentConfig.reasoningEffort;
+            }
             models[type] = {
               provider: model.provider,
               name: model.name,
               api_base: model.baseUrl || '',
-              extra_fields: {
-                model_id: model.ulid || model.id,
-              },
+              extra_fields: extraFields,
             };
           }
         });
@@ -458,7 +475,12 @@ export function AgentOrchestrator({ editingAgent, onSaved }: AgentOrchestratorPr
             description: subAgent.description,
             prompt: subAgent.prompt,
             model: selectedModel ? {
-              extra_fields: { model_id: selectedModel.ulid || selectedModel.id },
+              extra_fields: {
+                model_id: selectedModel.ulid || selectedModel.id,
+                ...(isGPT56Model(selectedModel.name || '')
+                  ? { reasoning_effort: agentConfig.reasoningEffort }
+                  : {}),
+              },
             } : undefined,
             capabilities: subAgent.capabilities,
             skills: selectedSkills,
@@ -558,6 +580,7 @@ export function AgentOrchestrator({ editingAgent, onSaved }: AgentOrchestratorPr
           imageModel: agentConfig.imageModel,
           videoModel: agentConfig.videoModel,
           temperature: agentConfig.temperature,
+          reasoningEffort: agentConfig.reasoningEffort,
           maxTokens: agentConfig.maxTokens,
           topK: agentConfig.topK,
           rerank: agentConfig.rerank,
@@ -1351,21 +1374,39 @@ export function AgentOrchestrator({ editingAgent, onSaved }: AgentOrchestratorPr
                 {t('orchestrator.advancedParams')}
               </div>
               <div className="grid grid-cols-2 gap-6">
-                <div className="space-y-2">
-                  <div className="flex justify-between">
-                    <label className="text-xs font-medium text-slate-600">{t('orchestrator.temperature')}</label>
-                    <span className="text-xs font-bold text-brand-500">{agentConfig.temperature}</span>
+                {isGPT56DefaultModel ? (
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium text-slate-600">{t('orchestrator.reasoningEffort')}</label>
+                    <select
+                      value={agentConfig.reasoningEffort}
+                      onChange={(event) => setAgentConfig(prev => ({
+                        ...prev,
+                        reasoningEffort: event.target.value as typeof prev.reasoningEffort,
+                      }))}
+                      className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-700 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+                    >
+                      {REASONING_EFFORTS.map(effort => (
+                        <option key={effort} value={effort}>{effort}</option>
+                      ))}
+                    </select>
                   </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.1"
-                    value={agentConfig.temperature}
-                    onChange={(e) => setAgentConfig(prev => ({ ...prev, temperature: parseFloat(e.target.value) }))}
-                    className="w-full accent-brand-500"
-                  />
-                </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="flex justify-between">
+                      <label className="text-xs font-medium text-slate-600">{t('orchestrator.temperature')}</label>
+                      <span className="text-xs font-bold text-brand-500">{agentConfig.temperature}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.1"
+                      value={agentConfig.temperature}
+                      onChange={(e) => setAgentConfig(prev => ({ ...prev, temperature: parseFloat(e.target.value) }))}
+                      className="w-full accent-brand-500"
+                    />
+                  </div>
+                )}
                 <div className="space-y-2">
                   <div className="flex justify-between">
                     <label className="text-xs font-medium text-slate-600">{t('orchestrator.maxTokens')}</label>
